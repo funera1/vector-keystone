@@ -14,7 +14,7 @@ HOST_WASM_DEMO_DEPENDENCIES += host-static-dh-ecdh
 HOST_WASM_DEMO_DEPENDENCIES += keystone-examples
 
 define HOST_WASM_DEMO_BUILD_CMDS
-    $(MAKE) -C $(@D)
+    PATH="$$PATH:$(HOST_DIR)/bin" $(MAKE) -C $(@D)
 endef
 
 # Creates a self-extracting archive using makeself. This archive
@@ -23,7 +23,7 @@ endef
 # resulting self-extracting application, wasm-demo.ke, is
 # installed to the root user's home directory.
 define HOST_WASM_DEMO_INSTALL_CMDS
-    (cd $(@D); mkdir -p pkg; \
+    (cd $(@D); PATH="$$PATH:$(HOST_DIR)/bin"; mkdir -p pkg; \
      cp ./target/riscv64gc-unknown-none-elf/release/wasm-rt pkg; \
      cp ./target/riscv64gc-unknown-linux-gnu/release/wasm-host pkg; \
      cp $(BUILDDIR)/buildroot.build/build/keystone-examples-*/hello/eyrie-rt pkg; \

@@ -15,7 +15,7 @@ FROM ubuntu:24.04
 
 RUN apt-get update
 
-RUN apt-get upgrade
+RUN apt-get -y upgrade
 
 RUN apt-get update && apt-get -y install --reinstall ca-certificates
 

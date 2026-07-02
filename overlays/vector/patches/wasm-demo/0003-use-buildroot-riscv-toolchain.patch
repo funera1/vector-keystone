@@ -1,0 +1,39 @@
+--- a/.cargo/config.toml	2025-10-30 15:20:11.222373012 +0200
++++ b/.cargo/config.toml	2026-07-02 00:00:00.000000000 +0300
+@@ -2,8 +2,8 @@
+ #target = "riscv64gc-unknown-linux-gnu"
+ 
+ [target.riscv64gc-unknown-linux-gnu]
+-linker    = "riscv64-linux-gnu-g++"
+-ar        = "riscv64-linux-gnu-ar"
++linker    = "riscv64-buildroot-linux-gnu-g++"
++ar        = "riscv64-buildroot-linux-gnu-ar"
+ #rustflags = ["-C", "target-feature=+crt-static"]
+ 
+ [target.x86_64-unknown-linux-gnu]
+--- a/wasm-host/.cargo/config.toml	2025-10-30 15:20:11.222373012 +0200
++++ b/wasm-host/.cargo/config.toml	2026-07-02 00:00:00.000000000 +0300
+@@ -2,8 +2,8 @@
+ target = "riscv64gc-unknown-linux-gnu"
+ 
+ [target.riscv64gc-unknown-linux-gnu]
+-linker    = "riscv64-linux-gnu-g++"
+-ar        = "riscv64-linux-gnu-ar"
++linker    = "riscv64-buildroot-linux-gnu-g++"
++ar        = "riscv64-buildroot-linux-gnu-ar"
+ #rustflags = ["-C", "target-feature=+crt-static"]
+ 
+ [target.x86_64-unknown-linux-gnu]
+--- a/wasm-client/.cargo/config.toml	2025-10-30 15:20:11.222373012 +0200
++++ b/wasm-client/.cargo/config.toml	2026-07-02 00:00:00.000000000 +0300
+@@ -2,8 +2,8 @@
+ target = "riscv64gc-unknown-linux-gnu"
+ 
+ [target.riscv64gc-unknown-linux-gnu]
+-linker    = "riscv64-linux-gnu-g++"
+-ar        = "riscv64-linux-gnu-ar"
++linker    = "riscv64-buildroot-linux-gnu-g++"
++ar        = "riscv64-buildroot-linux-gnu-ar"
+ #rustflags = ["-C", "target-feature=+crt-static"]
+ 
+ [target.x86_64-unknown-linux-gnu]
