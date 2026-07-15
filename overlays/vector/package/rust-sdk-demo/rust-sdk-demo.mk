@@ -10,10 +10,11 @@ HOST_RUST_SDK_DEMO_INSTALL_STAGING = YES
 HOST_RUST_SDK_DEMO_INSTALL_TARGET = YES
 
 HOST_RUST_SDK_DEMO_DEPENDENCIES += host-rust-sdk
+HOST_RUST_SDK_DEMO_DEPENDENCIES += host-makeself
 HOST_RUST_SDK_DEMO_DEPENDENCIES += keystone-examples
 
 define HOST_RUST_SDK_DEMO_BUILD_CMDS
-    PATH="$$PATH:$(HOST_DIR)/bin" $(MAKE) -C $(@D) all
+	PATH=$(HOST_DIR)/bin:$$PATH $(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 $(MAKE) -C $(@D) all
 endef
 
 # Creates a self-extracting archive using makeself. This archive
@@ -22,7 +23,7 @@ endef
 # resulting self-extracting application, rust-sdk-demo.ke, is
 # installed to the root user's home directory.
 define HOST_RUST_SDK_DEMO_INSTALL_CMDS
-    (cd $(@D); PATH="$$PATH:$(HOST_DIR)/bin"; mkdir -p pkg; \
+    (cd $(@D); PATH="$(HOST_DIR)/bin:$$PATH"; mkdir -p pkg; \
      cp ./target/riscv64gc-unknown-none-elf/release/rust-eapp pkg; \
      cp ./target/riscv64gc-unknown-linux-gnu/release/rust-happ pkg; \
      cp $(BUILDDIR)/buildroot.build/build/keystone-examples-*/hello/eyrie-rt pkg; \

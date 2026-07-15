@@ -12,7 +12,7 @@ HOST_RUST_SDK_INSTALL_TARGET = YES
 HOST_RUST_SDK_DEPENDENCIES += host-rust-bin
 
 define HOST_RUST_SDK_BUILD_CMDS
-    $(MAKE) -C $(@D) all
+	PATH=$(HOST_DIR)/bin:$$PATH $(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 $(MAKE) -C $(@D) all
 endef
 
 $(eval $(host-generic-package))

@@ -13,6 +13,9 @@
 #include "host/keystone.h"
 #include "verifier/report.h"
 
+void phase_marker(const char* phase);
+void phase_pause();
+
 class SharedBuffer {
  public:
   SharedBuffer(void* buffer, size_t buffer_len)
@@ -77,6 +80,7 @@ private:
  static void print_value_wrapper(RunData& run_data);
  static void copy_report_wrapper(RunData& run_data);
  static void get_host_string_wrapper(RunData& run_data);
+ static void phase_marker_wrapper(RunData& run_data);
  const Keystone::Params params_;
  const std::string eapp_file_;
  const std::string rt_file_;

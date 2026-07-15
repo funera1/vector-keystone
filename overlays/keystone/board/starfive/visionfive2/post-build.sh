@@ -10,3 +10,8 @@ cp $BR2_EXTERNAL_KEYSTONE_PATH/board/starfive/visionfive2/20-end1.network $TARGE
 
 # Copy sshd config to enable ssh root login, password is "starfive"
 cp $BR2_EXTERNAL_KEYSTONE_PATH/board/starfive/visionfive2/sshd_config $TARGET_DIR/etc/ssh/sshd_config
+
+# Copy experiment scripts and other Keystone rootfs overlay files.
+if [ -d "$BR2_EXTERNAL_KEYSTONE_PATH/fs" ]; then
+    cp -a "$BR2_EXTERNAL_KEYSTONE_PATH/fs/." "$TARGET_DIR/"
+fi

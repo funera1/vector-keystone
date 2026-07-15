@@ -13,6 +13,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <ctime>
+#include <unistd.h>
 
 #include "edge/edge_common.h"
 #include "host/keystone.h"
@@ -22,6 +24,28 @@
 #define OCALL_PRINT_VALUE 2
 #define OCALL_COPY_REPORT 3
 #define OCALL_GET_STRING 4
+#define OCALL_PHASE_MARKER 5
+
+static unsigned long long
+monotonic_ns() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  return static_cast<unsigned long long>(ts.tv_sec) * 1000000000ULL +
+         static_cast<unsigned long long>(ts.tv_nsec);
+}
+
+void
+phase_marker(const char* phase) {
+  fprintf(stderr, "PHASE,%s,%llu\n", phase, monotonic_ns());
+  fflush(stderr);
+}
+
+void
+phase_pause() {
+  const char* value = getenv("KEYSTONE_PHASE_DELAY_SECONDS");
+  unsigned int seconds = value ? static_cast<unsigned int>(strtoul(value, nullptr, 10)) : 2;
+  sleep(seconds);
+}
 
 void
 SharedBuffer::set_ok() {
@@ -213,6 +237,16 @@ Host::get_host_string_wrapper(RunData& run_data) {
 }
 
 void
+Host::phase_marker_wrapper(RunData& run_data) {
+  SharedBuffer& shared_buffer = run_data.shared_buffer;
+  auto marker = shared_buffer.get_c_string_or_set_bad_offset();
+  if (marker.has_value()) {
+    phase_marker(marker.value());
+    shared_buffer.set_ok();
+  }
+}
+
+void
 Host::dispatch_ocall(RunData& run_data) {
   struct edge_call* edge_call = (struct edge_call*)run_data.shared_buffer.ptr();
   switch (edge_call->call_id) {
@@ -228,26 +262,50 @@ Host::dispatch_ocall(RunData& run_data) {
     case OCALL_GET_STRING:
       get_host_string_wrapper(run_data);
       break;
+    case OCALL_PHASE_MARKER:
+      phase_marker_wrapper(run_data);
+      break;
   }
   return;
 }
 
 Report
 Host::run(const std::string& nonce) {
-  Keystone::Enclave enclave;
-  enclave.init(eapp_file_.c_str(), rt_file_.c_str(), ld_file_.c_str(), params_);
+  std::unique_ptr<Report> report;
 
-  RunData run_data{
-      SharedBuffer{enclave.getSharedBuffer(), enclave.getSharedBufferSize()},
-      nonce, nullptr};
+  phase_marker("object_create_start");
+  {
+    Keystone::Enclave enclave;
+    phase_marker("object_create_end");
+    phase_pause();
 
-  enclave.registerOcallDispatch([&run_data](void* buffer) {
-    assert(buffer == (void*)run_data.shared_buffer.ptr());
-    dispatch_ocall(run_data);
-  });
+    phase_marker("init_start");
+    enclave.init(eapp_file_.c_str(), rt_file_.c_str(), ld_file_.c_str(), params_);
+    phase_marker("init_end");
+    phase_pause();
 
-  uintptr_t encl_ret;
-  enclave.run(&encl_ret);
+    phase_marker("ocall_setup_start");
+    RunData run_data{
+        SharedBuffer{enclave.getSharedBuffer(), enclave.getSharedBufferSize()},
+        nonce, nullptr};
 
-  return *run_data.report;
+    enclave.registerOcallDispatch([&run_data](void* buffer) {
+      assert(buffer == (void*)run_data.shared_buffer.ptr());
+      dispatch_ocall(run_data);
+    });
+    phase_marker("ocall_setup_end");
+    phase_pause();
+
+    uintptr_t encl_ret;
+    phase_marker("run_start");
+    enclave.run(&encl_ret);
+    phase_marker("run_end");
+    report = std::move(run_data.report);
+    phase_pause();
+
+    phase_marker("destroy_start");
+  }
+  phase_marker("destroy_end");
+
+  return *report;
 }

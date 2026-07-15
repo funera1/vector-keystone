@@ -22,10 +22,18 @@
 
 void
 Verifier::run() {
+  phase_marker("experiment_start");
+  phase_pause();
+
   const std::string nonce = std::to_string(random() % 0x100000000);
   Host host(params_, eapp_file_, rt_file_, ld_file_);
   Report report = host.run(nonce);
+
+  phase_pause();
+  phase_marker("verify_start");
   verify_report(report, nonce);
+  phase_marker("verify_end");
+  phase_marker("experiment_end");
 }
 
 void

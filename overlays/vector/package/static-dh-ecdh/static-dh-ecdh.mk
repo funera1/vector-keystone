@@ -12,7 +12,7 @@ HOST_STATIC_DH_ECDH_INSTALL_TARGET = YES
 HOST_STATIC_DH_ECDH_DEPENDENCIES += host-rust-bin
 
 define HOST_STATIC_DH_ECDH_BUILD_CMDS
-    $(MAKE) -C $(@D)
+	PATH=$(HOST_DIR)/bin:$$PATH $(PKG_CARGO_ENV) $(MAKE) -C $(@D)
 endef
 
 $(eval $(host-generic-package))
