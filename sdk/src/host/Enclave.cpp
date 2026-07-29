@@ -3,6 +3,8 @@
 // All Rights Reserved. See LICENSE for license details.
 //------------------------------------------------------------------------------
 #include "Enclave.hpp"
+#include <cstdio>
+#include <ctime>
 #include <math.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -14,6 +16,20 @@ extern "C" {
 #include "hash_util.hpp"
 
 namespace Keystone {
+
+static unsigned long long
+monotonic_ns() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  return static_cast<unsigned long long>(ts.tv_sec) * 1000000000ULL +
+         static_cast<unsigned long long>(ts.tv_nsec);
+}
+
+static void
+init_phase_marker(const char* phase, unsigned long long timestamp_ns) {
+  fprintf(stderr, "PHASE,%s,%llu\n", phase, timestamp_ns);
+  fflush(stderr);
+}
 
 Enclave::Enclave() {
 }
@@ -151,6 +167,7 @@ Error
 Enclave::init(
     const char* eapppath, const char* runtimepath, const char* loaderpath, Params _params,
     uintptr_t alternatePhysAddr) {
+  const unsigned long long init_start_ns = monotonic_ns();
   params = _params;
 
   pMemory = new PhysicalEnclaveMemory();
@@ -189,9 +206,14 @@ Enclave::init(
 
   pMemory->startFreeMem();
 
-  if (pDevice->finalize(
+  const unsigned long long finalize_start_ns = monotonic_ns();
+  init_phase_marker("finalize_ioctl_start", finalize_start_ns);
+  Error finalize_error = pDevice->finalize(
           pMemory->getRuntimePhysAddr(), pMemory->getEappPhysAddr(),
-          pMemory->getFreePhysAddr(), params.getFreeMemSize()) != Error::Success) {
+          pMemory->getFreePhysAddr(), params.getFreeMemSize());
+  const unsigned long long finalize_end_ns = monotonic_ns();
+  init_phase_marker("finalize_ioctl_end", finalize_end_ns);
+  if (finalize_error != Error::Success) {
     destroy();
     return Error::DeviceError;
   }
@@ -207,6 +229,15 @@ Enclave::init(
   delete enclaveFile;
   delete runtimeFile;
   delete loaderFile;
+
+  const unsigned long long init_end_ns = monotonic_ns();
+  const unsigned long long total_ns = init_end_ns - init_start_ns;
+  const unsigned long long finalize_ioctl_ns = finalize_end_ns - finalize_start_ns;
+  fprintf(
+      stderr,
+      "INIT_TIMING,total_ns,%llu,host_s_mode_ns,%llu,finalize_ioctl_ns,%llu\n",
+      total_ns, total_ns - finalize_ioctl_ns, finalize_ioctl_ns);
+  fflush(stderr);
   return Error::Success;
 }
 

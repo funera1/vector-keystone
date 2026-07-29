@@ -2,4 +2,5 @@
 Name=end0
 
 [Network]
-DHCP=yes
+DHCP=no
+Address=10.0.0.3/24

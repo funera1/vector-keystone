@@ -8,6 +8,7 @@
 #include <asm/sbi.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
+#include <linux/sched.h>
 
 static int keystone_create_enclave(struct file *filep, unsigned long arg)
 {
@@ -73,17 +74,33 @@ static int keystone_finalize_enclave(unsigned long arg)
 
   ret = sbi_sm_create_enclave(&create_args);
 
+  if (ret.error == SBI_ERR_SM_ENCLAVE_INTERRUPTED) {
+    enclave->eid = ret.value;
+    do {
+      cond_resched();
+      ret = sbi_sm_resume_create_enclave(enclave->eid);
+    } while (ret.error == SBI_ERR_SM_ENCLAVE_INTERRUPTED);
+  }
+
   if (ret.error) {
     keystone_err("keystone_create_enclave: SBI call failed with error code %ld\n", ret.error);
     goto error_destroy_enclave;
   }
 
-  enclave->eid = ret.value;
+  if (enclave->eid == KEYSTONE_INVALID_EID)
+    enclave->eid = ret.value;
 
   return 0;
 
 error_destroy_enclave:
   /* This can handle partial initialization failure */
+  if (enclave->eid != KEYSTONE_INVALID_EID) {
+    struct sbiret destroy_ret = sbi_sm_destroy_enclave(enclave->eid);
+    if (destroy_ret.error)
+      keystone_err("failed to destroy partially initialized enclave: SBI error %ld\n",
+                   destroy_ret.error);
+    enclave->eid = KEYSTONE_INVALID_EID;
+  }
   destroy_enclave(enclave);
 
   return -EINVAL;
@@ -105,7 +122,7 @@ static int keystone_run_enclave(unsigned long data)
     return -EINVAL;
   }
 
-  if (enclave->eid < 0) {
+  if (enclave->eid == KEYSTONE_INVALID_EID) {
     keystone_err("real enclave does not exist\n");
     return -EINVAL;
   }
@@ -160,7 +177,7 @@ static int __keystone_destroy_enclave(unsigned int ueid)
     return -EINVAL;
   }
 
-  if (enclave->eid >= 0) {
+  if (enclave->eid != KEYSTONE_INVALID_EID) {
     ret = sbi_sm_destroy_enclave(enclave->eid);
     if (ret.error) {
       keystone_err("fatal: cannot destroy enclave: SBI failed with error code %ld\n", ret.error);
@@ -204,7 +221,7 @@ static int keystone_resume_enclave(unsigned long data)
     return -EINVAL;
   }
 
-  if (enclave->eid < 0) {
+  if (enclave->eid == KEYSTONE_INVALID_EID) {
     keystone_err("real enclave does not exist\n");
     return -EINVAL;
   }

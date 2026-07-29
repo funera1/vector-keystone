@@ -60,6 +60,8 @@ struct enclave
   bool is_init;
 };
 
+#define KEYSTONE_INVALID_EID (~0UL)
+
 
 // global debug functions
 void debug_dump(char* ptr, unsigned long size);

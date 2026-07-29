@@ -37,6 +37,9 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
     case SBI_SM_CREATE_ENCLAVE:
       retval = sbi_sm_create_enclave(out_val, regs->a0);
       break;
+    case SBI_SM_RESUME_CREATE_ENCLAVE:
+      retval = sbi_sm_resume_create_enclave(regs->a0);
+      break;
     case SBI_SM_DESTROY_ENCLAVE:
       retval = sbi_sm_destroy_enclave(regs->a0);
       break;

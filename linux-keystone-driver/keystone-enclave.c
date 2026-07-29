@@ -46,7 +46,7 @@ struct enclave* create_enclave(unsigned long min_pages)
     goto error_no_free;
   }
 
-  enclave->eid = -1;
+  enclave->eid = KEYSTONE_INVALID_EID;
   enclave->utm = NULL;
   enclave->close_on_pexit = 1;
 

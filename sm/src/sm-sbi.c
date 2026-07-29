@@ -26,6 +26,11 @@ unsigned long sbi_sm_create_enclave(unsigned long* eid, uintptr_t create_args)
   return ret;
 }
 
+unsigned long sbi_sm_resume_create_enclave(unsigned long eid)
+{
+  return resume_create_enclave((enclave_id)eid);
+}
+
 unsigned long sbi_sm_destroy_enclave(unsigned long eid)
 {
   unsigned long ret;

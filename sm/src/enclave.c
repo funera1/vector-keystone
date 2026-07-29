@@ -12,6 +12,7 @@
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_locks.h>
 #include <sbi/sbi_console.h>
+#include <sbi/sbi_timer.h>
 
 struct enclave enclaves[ENCL_MAX];
 
@@ -20,6 +21,61 @@ struct enclave enclaves[ENCL_MAX];
 #define ENCLAVE_EXISTS(eid) (eid < ENCL_MAX && enclaves[eid].state >= 0)
 
 static spinlock_t encl_lock = SPIN_LOCK_INITIALIZER;
+
+static inline unsigned long create_timing_cycles(void)
+{
+  unsigned long cycles;
+  asm volatile ("rdcycle %0" : "=r" (cycles));
+  return cycles;
+}
+
+static unsigned long create_timing_us(uint64_t ticks)
+{
+  const struct sbi_timer_device *timer = sbi_timer_get_device();
+
+  if (!timer || !timer->timer_freq)
+    return 0;
+  return (unsigned long)((ticks * 1000000ULL) / timer->timer_freq);
+}
+
+static unsigned long run_measurement_slice(enclave_id eid)
+{
+  struct enclave *enclave = &enclaves[eid];
+  struct enclave_measurement *measurement = &enclave->measurement;
+  unsigned long ret = validate_and_hash_enclave(enclave);
+
+  spin_lock(&encl_lock);
+  if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS)
+    enclave->state = FRESH;
+  else
+    enclave->state = HASHING;
+  spin_unlock(&encl_lock);
+
+  if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS) {
+    uint64_t end_ticks = sbi_timer_value();
+    unsigned long end_cycles = create_timing_cycles();
+
+    sbi_printf(
+        "SM_CREATE_TIMING,pmp_setup_us,%lu,pmp_setup_ticks,%llu,pmp_setup_cycles,%lu,"
+        "clean_us,%lu,clean_ticks,%llu,clean_cycles,%lu,"
+        "platform_us,%lu,platform_ticks,%llu,platform_cycles,%lu,"
+        "validate_hash_us,%lu,validate_hash_ticks,%llu,validate_hash_cycles,%lu\n",
+        create_timing_us(measurement->pmp_ticks),
+        (unsigned long long)measurement->pmp_ticks,
+        measurement->pmp_cycles,
+        create_timing_us(measurement->clean_ticks),
+        (unsigned long long)measurement->clean_ticks,
+        measurement->clean_cycles,
+        create_timing_us(measurement->platform_ticks),
+        (unsigned long long)measurement->platform_ticks,
+        measurement->platform_cycles,
+        create_timing_us(end_ticks - measurement->start_ticks),
+        (unsigned long long)(end_ticks - measurement->start_ticks),
+        end_cycles - measurement->start_cycles);
+  }
+
+  return ret;
+}
 
 extern void save_host_regs(void);
 extern void restore_host_regs(void);
@@ -346,6 +402,12 @@ unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create_t
   enclave_id eid;
   unsigned long ret;
   int region, shared_region;
+  uint64_t pmp_start_ticks, pmp_end_ticks;
+  uint64_t clean_start_ticks, clean_end_ticks;
+  uint64_t platform_start_ticks, platform_end_ticks;
+  unsigned long pmp_start_cycles, pmp_end_cycles;
+  unsigned long clean_start_cycles, clean_end_cycles;
+  unsigned long platform_start_cycles, platform_end_cycles;
 
   /* Runtime parameters */
   if(!is_create_args_valid(&create_args))
@@ -369,6 +431,8 @@ unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create_t
     goto error;
 
   // create a PMP region bound to the enclave
+  pmp_start_ticks = sbi_timer_value();
+  pmp_start_cycles = create_timing_cycles();
   ret = SBI_ERR_SM_ENCLAVE_PMP_FAILURE;
   if(pmp_region_init_atomic(base, size, PMP_PRI_ANY, &region, 0))
     goto free_encl_idx;
@@ -380,9 +444,15 @@ unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create_t
   // set pmp registers for private region (not shared)
   if(pmp_set_global(region, PMP_NO_PERM))
     goto free_shared_region;
+  pmp_end_cycles = create_timing_cycles();
+  pmp_end_ticks = sbi_timer_value();
 
   // cleanup some memory regions for sanity See issue #38
+  clean_start_ticks = sbi_timer_value();
+  clean_start_cycles = create_timing_cycles();
   clean_enclave_memory(utbase, utsize);
+  clean_end_cycles = create_timing_cycles();
+  clean_end_ticks = sbi_timer_value();
 
 
   // initialize enclave metadata
@@ -405,27 +475,44 @@ unsigned long create_enclave(unsigned long *eidptr, struct keystone_sbi_create_t
 
   /* Platform create happens as the last thing before hashing/etc since
      it may modify the enclave struct */
+  platform_start_ticks = sbi_timer_value();
+  platform_start_cycles = create_timing_cycles();
   ret = platform_create_enclave(&enclaves[eid]);
+  platform_end_cycles = create_timing_cycles();
+  platform_end_ticks = sbi_timer_value();
   if (ret)
     goto unset_region;
 
   /* Validate memory, prepare hash and signature for attestation */
-  spin_lock(&encl_lock); // FIXME This should error for second enter.
- 
-  ret = validate_and_hash_enclave(&enclaves[eid]);
-  /* The enclave is fresh if it has been validated and hashed but not run yet. */
-  if (ret)
-    goto unlock;
+  uintptr_t sizes[3] = {
+    params.runtime_base - params.dram_base,
+    params.user_base - params.runtime_base,
+    params.free_base - params.user_base,
+  };
+  struct enclave_measurement *measurement = &enclaves[eid].measurement;
+  hash_init(&measurement->ctx);
+  hash_extend(&measurement->ctx, sizes, sizeof(sizes));
+  measurement->next_page = params.dram_base;
+  measurement->end_page = params.free_base;
+  measurement->pmp_ticks = pmp_end_ticks - pmp_start_ticks;
+  measurement->clean_ticks = clean_end_ticks - clean_start_ticks;
+  measurement->platform_ticks = platform_end_ticks - platform_start_ticks;
+  measurement->pmp_cycles = pmp_end_cycles - pmp_start_cycles;
+  measurement->clean_cycles = clean_end_cycles - clean_start_cycles;
+  measurement->platform_cycles = platform_end_cycles - platform_start_cycles;
+  measurement->start_ticks = sbi_timer_value();
+  measurement->start_cycles = create_timing_cycles();
 
-  enclaves[eid].state = FRESH;
-  /* EIDs are unsigned int in size, copy via simple copy */
+  spin_lock(&encl_lock);
+  enclaves[eid].state = HASHING_BUSY;
   *eidptr = eid;
-
   spin_unlock(&encl_lock);
-  return SBI_ERR_SM_ENCLAVE_SUCCESS;
 
-unlock:
-  spin_unlock(&encl_lock);
+  ret = run_measurement_slice(eid);
+  if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS ||
+      ret == SBI_ERR_SM_ENCLAVE_INTERRUPTED)
+    return ret;
+
 // free_platform:
   platform_destroy_enclave(&enclaves[eid]);
 unset_region:
@@ -440,6 +527,19 @@ error:
   return ret;
 }
 
+unsigned long resume_create_enclave(enclave_id eid)
+{
+  spin_lock(&encl_lock);
+  if (!ENCLAVE_EXISTS(eid) || enclaves[eid].state != HASHING) {
+    spin_unlock(&encl_lock);
+    return SBI_ERR_SM_ENCLAVE_NOT_RESUMABLE;
+  }
+  enclaves[eid].state = HASHING_BUSY;
+  spin_unlock(&encl_lock);
+
+  return run_measurement_slice(eid);
+}
+
 /*
  * Fully destroys an enclave
  * Deallocates EID, clears epm, etc
@@ -451,7 +551,8 @@ unsigned long destroy_enclave(enclave_id eid)
 
   spin_lock(&encl_lock);
   destroyable = (ENCLAVE_EXISTS(eid)
-                 && enclaves[eid].state <= STOPPED);
+                 && enclaves[eid].state <= STOPPED
+                 && enclaves[eid].state != HASHING_BUSY);
   /* update the enclave state first so that
    * no SM can run the enclave any longer */
   if(destroyable)
