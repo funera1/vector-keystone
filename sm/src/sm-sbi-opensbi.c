@@ -14,12 +14,76 @@
 #include "sm.h"
 #include "cpu.h"
 
+/*
+ * Deliberately minimal M-mode preemption support for Miralis vM-mode.
+ *
+ * OpenSBI's timer trap calls keystone_mmode_timer_preempt() after acknowledging
+ * MTIP.  When a Keystone SBI call is active, the hook abandons the nested
+ * M-mode context and exits through the original S-mode trap frame.
+ */
+#define KEYSTONE_PREEMPT_MAX_HARTS 16
+#define MIRALIS_EID 0x08475bcdUL
+#define MIRALIS_PREEMPT_READY_FID 3UL
+
+static struct sbi_trap_regs *volatile
+  preempt_return_regs[KEYSTONE_PREEMPT_MAX_HARTS];
+
+static bool keystone_call_is_preemptible(unsigned long funcid)
+{
+  switch (funcid) {
+    case SBI_SM_RUN_ENCLAVE:
+    case SBI_SM_RESUME_ENCLAVE:
+    case SBI_SM_STOP_ENCLAVE:
+    case SBI_SM_EXIT_ENCLAVE:
+      return false;
+    default:
+      return true;
+  }
+}
+
+static unsigned long keystone_test_long_operation(void)
+{
+  volatile unsigned long progress;
+
+  sbi_printf("[SM-TEST] long operation start\n");
+  for (progress = 0; progress < 100000000; progress++)
+    __asm__ __volatile__("" ::: "memory");
+  sbi_printf("[SM-TEST] long operation complete progress=%lu\n", progress);
+
+  return SBI_SUCCESS;
+}
+
+void keystone_mmode_timer_preempt(struct sbi_trap_regs *nested_regs)
+{
+  unsigned long hartid = current_hartid();
+  struct sbi_trap_regs *return_regs;
+
+  if (hartid >= KEYSTONE_PREEMPT_MAX_HARTS ||
+      (nested_regs->mstatus & MSTATUS_MPP) !=
+        (PRV_M << MSTATUS_MPP_SHIFT))
+    return;
+
+  return_regs = preempt_return_regs[hartid];
+  if (!return_regs)
+    return;
+
+  sbi_printf("[SM] M-mode timer preemption fired on hart %lu\n", hartid);
+
+  /* Keystone timer work is complete. Miralis now owns the context switch. */
+  register unsigned long a6 asm("a6") = MIRALIS_PREEMPT_READY_FID;
+  register unsigned long a7 asm("a7") = MIRALIS_EID;
+  asm volatile("ecall" : "+r"(a6), "+r"(a7) : : "memory");
+}
+
 static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long funcid,
                      const struct sbi_trap_regs *regs,
                      unsigned long *out_val,
                      struct sbi_trap_info *out_trap)
 {
   uintptr_t retval;
+  unsigned long hartid = current_hartid();
+  bool preemptible = keystone_call_is_preemptible(funcid) &&
+                     hartid < KEYSTONE_PREEMPT_MAX_HARTS;
 
   if (funcid <= FID_RANGE_DEPRECATED) { return SBI_ERR_SM_DEPRECATED; }
   else if (funcid <= FID_RANGE_HOST)
@@ -33,7 +97,16 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
       return SBI_ERR_SM_ENCLAVE_SBI_PROHIBITED;
   }
 
+  if (preemptible) {
+    preempt_return_regs[hartid] = (struct sbi_trap_regs *)regs;
+    csr_set(CSR_MIE, MIP_MTIP);
+    csr_set(CSR_MSTATUS, MSTATUS_MIE);
+  }
+
   switch (funcid) {
+    case SBI_SM_TEST_LONG_OPERATION:
+      retval = keystone_test_long_operation();
+      break;
     case SBI_SM_CREATE_ENCLAVE:
       retval = sbi_sm_create_enclave(out_val, regs->a0);
       break;
@@ -75,6 +148,11 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
     default:
       retval = SBI_ERR_SM_NOT_IMPLEMENTED;
       break;
+  }
+
+  if (preemptible) {
+    csr_clear(CSR_MSTATUS, MSTATUS_MIE);
+    preempt_return_regs[hartid] = NULL;
   }
 
   return retval;

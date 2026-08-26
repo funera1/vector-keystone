@@ -168,6 +168,8 @@ void sm_init(bool cold_boot)
   }
 
   sbi_printf("[SM] Keystone security monitor has been initialized!\n");
+  sbi_printf("[SM] M-mode timer preemption: %s (unsafe prototype)\n",
+             KEYSTONE_MM_PREEMPT_VERSION);
 
   sm_print_hash();
 
