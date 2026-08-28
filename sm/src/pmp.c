@@ -24,6 +24,22 @@
 /* PMP global spin locks */
 static spinlock_t pmp_lock = SPIN_LOCK_INITIALIZER;
 
+static inline void keystone_debug_pmp_lock(spinlock_t *lock,
+                                           unsigned long site)
+{
+  spin_lock(lock);
+  keystone_preempt_debug_lock_acquired(KEYSTONE_DEBUG_LOCK_PMP, site);
+}
+
+static inline void keystone_debug_pmp_unlock(spinlock_t *lock)
+{
+  keystone_preempt_debug_lock_released(KEYSTONE_DEBUG_LOCK_PMP);
+  spin_unlock(lock);
+}
+
+#define spin_lock(lock) keystone_debug_pmp_lock((lock), __LINE__)
+#define spin_unlock(lock) keystone_debug_pmp_unlock(lock)
+
 /* PMP region getter/setters */
 static struct pmp_region regions[PMP_MAX_N_REGION];
 static uint32_t reg_bitmap = 0;

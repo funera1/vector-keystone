@@ -7,6 +7,7 @@
 #include "pmp.h"
 #include "page.h"
 #include "cpu.h"
+#include "sm-sbi-opensbi.h"
 #include "platform-hook.h"
 #include <sbi/sbi_string.h>
 #include <sbi/riscv_asm.h>
@@ -21,6 +22,22 @@ struct enclave enclaves[ENCL_MAX];
 #define ENCLAVE_EXISTS(eid) (eid < ENCL_MAX && enclaves[eid].state >= 0)
 
 static spinlock_t encl_lock = SPIN_LOCK_INITIALIZER;
+
+static inline void keystone_debug_encl_lock(spinlock_t *lock,
+                                            unsigned long site)
+{
+  spin_lock(lock);
+  keystone_preempt_debug_lock_acquired(KEYSTONE_DEBUG_LOCK_ENCLAVE, site);
+}
+
+static inline void keystone_debug_encl_unlock(spinlock_t *lock)
+{
+  keystone_preempt_debug_lock_released(KEYSTONE_DEBUG_LOCK_ENCLAVE);
+  spin_unlock(lock);
+}
+
+#define spin_lock(lock) keystone_debug_encl_lock((lock), __LINE__)
+#define spin_unlock(lock) keystone_debug_encl_unlock(lock)
 
 static inline unsigned long create_timing_cycles(void)
 {
@@ -299,10 +316,18 @@ unsigned long copy_enclave_create_args(uintptr_t src, struct keystone_sbi_create
 
   int region_overlap = copy_to_sm(dest, src, sizeof(struct keystone_sbi_create_t));
 
-  if (region_overlap)
+  if (region_overlap) {
+    sbi_printf(
+        "[SM-DEBUG] create args copy failed hart=%lu src=0x%lx "
+        "mstatus=0x%lx satp=0x%lx pmpcfg0=0x%lx "
+        "pmpaddr0=0x%lx pmpaddr1=0x%lx pmpaddr2=0x%lx\n",
+        (unsigned long)current_hartid(), src, csr_read(CSR_MSTATUS), csr_read(CSR_SATP),
+        csr_read(CSR_PMPCFG0), csr_read(CSR_PMPADDR0), csr_read(CSR_PMPADDR1),
+        csr_read(CSR_PMPADDR2));
     return SBI_ERR_SM_ENCLAVE_REGION_OVERLAPS;
-  else
+  } else {
     return SBI_ERR_SM_ENCLAVE_SUCCESS;
+  }
 }
 
 /* copies data from enclave, source must be inside EPM */
