@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Debug Instrumentation <debug@example.com>
+Date: Sun, 30 Aug 2026 20:00:00 +0900
+Subject: [PATCH] riscv: log Keystone ioctl copy page faults
+
+Instrument the RISC-V page-fault path for hello-runner.
+---
+ arch/riscv/kernel/traps.c | 19 +++++++++++++++++++
+ arch/riscv/mm/fault.c     | 14 ++++++++++++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 80230de..d25b267 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -367,12 +367,31 @@ void do_trap_ecall_u(struct pt_regs *regs)
+ }
+ 
+ #ifdef CONFIG_MMU
++static atomic_long_t keystone_page_fault_seq = ATOMIC_LONG_INIT(0);
++
+ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
+ {
+ 	irqentry_state_t state = irqentry_enter(regs);
++	unsigned long seq = 0;
++	bool trace_keystone = !strncmp(current->comm, "hello-runner",
++				       TASK_COMM_LEN);
++
++	if (trace_keystone) {
++		seq = atomic_long_inc_return(&keystone_page_fault_seq);
++		pr_info("KEYSTONE-PF trap enter seq=%lu cpu=%u cause=0x%lx "
++			"epc=0x%lx badaddr=0x%lx status=0x%lx satp=0x%lx\n",
++			seq, raw_smp_processor_id(), regs->cause, regs->epc,
++			regs->badaddr, regs->status, csr_read(CSR_SATP));
++	}
+ 
+ 	handle_page_fault(regs);
+ 
++	if (trace_keystone)
++		pr_info("KEYSTONE-PF trap exit seq=%lu cpu=%u epc=0x%lx "
++			"badaddr=0x%lx status=0x%lx satp=0x%lx\n",
++			seq, raw_smp_processor_id(), regs->epc, regs->badaddr,
++			regs->status, csr_read(CSR_SATP));
++
+ 	local_irq_disable();
+ 
+ 	irqentry_exit(regs, state);
+diff --git a/arch/riscv/mm/fault.c b/arch/riscv/mm/fault.c
+index 04ed6f8..c6b884e 100644
+--- a/arch/riscv/mm/fault.c
++++ b/arch/riscv/mm/fault.c
+@@ -403,8 +403,22 @@ void handle_page_fault(struct pt_regs *regs)
+ 	 * make sure we exit gracefully rather than endlessly redo
+ 	 * the fault.
+ 	 */
++	if (!strncmp(current->comm, "hello-runner", TASK_COMM_LEN))
++		pr_info("KEYSTONE-PF mm before cpu=%u cause=0x%lx epc=0x%lx "
++			"addr=0x%lx flags=0x%x vm_start=0x%lx vm_end=0x%lx "
++			"vm_flags=0x%lx status=0x%lx satp=0x%lx\n",
++			raw_smp_processor_id(), cause, regs->epc, addr, flags,
++			vma->vm_start, vma->vm_end, vma->vm_flags,
++			regs->status, csr_read(CSR_SATP));
++
+ 	fault = handle_mm_fault(vma, addr, flags, regs);
+ 
++	if (!strncmp(current->comm, "hello-runner", TASK_COMM_LEN))
++		pr_info("KEYSTONE-PF mm after cpu=%u cause=0x%lx epc=0x%lx "
++			"addr=0x%lx fault=0x%x status=0x%lx satp=0x%lx\n",
++			raw_smp_processor_id(), cause, regs->epc, addr, fault,
++			regs->status, csr_read(CSR_SATP));
++
+ 	/*
+ 	 * If we need to retry but a fatal signal is pending, handle the
+ 	 * signal first. We do not need to release the mmap_lock because it
+-- 
+2.43.0

@@ -46,20 +46,45 @@ static inline unsigned long create_timing_cycles(void)
   return cycles;
 }
 
-static unsigned long create_timing_us(uint64_t ticks)
-{
-  const struct sbi_timer_device *timer = sbi_timer_get_device();
+static unsigned long measurement_debug_sequence;
 
-  if (!timer || !timer->timer_freq)
-    return 0;
-  return (unsigned long)((ticks * 1000000ULL) / timer->timer_freq);
+static bool measurement_debug_should_log(unsigned long sequence,
+                                         unsigned long ret)
+{
+  return sequence <= 8 || !(sequence & (sequence - 1)) ||
+         ret == SBI_ERR_SM_ENCLAVE_SUCCESS;
+}
+
+static void measurement_debug_log(const char *event, enclave_id eid,
+                                  unsigned long sequence,
+                                  struct enclave_measurement *measurement,
+                                  unsigned long ret)
+{
+  unsigned long mstatus = csr_read_clear(CSR_MSTATUS, MSTATUS_MIE);
+
+  sbi_printf("[SM-DEBUG] measurement %s hart=%lu eid=%lu seq=%lu "
+             "next=0x%lx end=0x%lx ret=0x%lx\n",
+             event, (unsigned long)current_hartid(), (unsigned long)eid,
+             sequence, measurement->next_page, measurement->end_page, ret);
+
+  if (mstatus & MSTATUS_MIE)
+    csr_set(CSR_MSTATUS, MSTATUS_MIE);
 }
 
 static unsigned long run_measurement_slice(enclave_id eid)
 {
   struct enclave *enclave = &enclaves[eid];
   struct enclave_measurement *measurement = &enclave->measurement;
+  unsigned long sequence = ++measurement_debug_sequence;
+
+  if (measurement_debug_should_log(sequence, SBI_ERR_SM_ENCLAVE_INTERRUPTED))
+    measurement_debug_log("enter", eid, sequence, measurement,
+                          SBI_ERR_SM_ENCLAVE_INTERRUPTED);
+
   unsigned long ret = validate_and_hash_enclave(enclave);
+
+  if (measurement_debug_should_log(sequence, ret))
+    measurement_debug_log("exit", eid, sequence, measurement, ret);
 
   spin_lock(&encl_lock);
   if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS)
@@ -67,29 +92,6 @@ static unsigned long run_measurement_slice(enclave_id eid)
   else
     enclave->state = HASHING;
   spin_unlock(&encl_lock);
-
-  if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS) {
-    uint64_t end_ticks = sbi_timer_value();
-    unsigned long end_cycles = create_timing_cycles();
-
-    sbi_printf(
-        "SM_CREATE_TIMING,pmp_setup_us,%lu,pmp_setup_ticks,%llu,pmp_setup_cycles,%lu,"
-        "clean_us,%lu,clean_ticks,%llu,clean_cycles,%lu,"
-        "platform_us,%lu,platform_ticks,%llu,platform_cycles,%lu,"
-        "validate_hash_us,%lu,validate_hash_ticks,%llu,validate_hash_cycles,%lu\n",
-        create_timing_us(measurement->pmp_ticks),
-        (unsigned long long)measurement->pmp_ticks,
-        measurement->pmp_cycles,
-        create_timing_us(measurement->clean_ticks),
-        (unsigned long long)measurement->clean_ticks,
-        measurement->clean_cycles,
-        create_timing_us(measurement->platform_ticks),
-        (unsigned long long)measurement->platform_ticks,
-        measurement->platform_cycles,
-        create_timing_us(end_ticks - measurement->start_ticks),
-        (unsigned long long)(end_ticks - measurement->start_ticks),
-        end_cycles - measurement->start_cycles);
-  }
 
   return ret;
 }
