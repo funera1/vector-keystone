@@ -23,12 +23,12 @@ index 80230de..d25b267 100644
  {
  	irqentry_state_t state = irqentry_enter(regs);
 +	unsigned long seq = 0;
-+	bool trace_keystone = !strncmp(current->comm, "hello-runner",
-+				       TASK_COMM_LEN);
++	bool trace_keystone = !user_mode(regs) && regs->cause == EXC_STORE_PAGE_FAULT && !strncmp(current->comm, "hello-runner", TASK_COMM_LEN);
 +
 +	if (trace_keystone) {
 +		seq = atomic_long_inc_return(&keystone_page_fault_seq);
-+		pr_info("KEYSTONE-PF trap enter seq=%lu cpu=%u cause=0x%lx "
++		if (seq <= 8)
++			pr_info("KEYSTONE-PF trap enter seq=%lu cpu=%u cause=0x%lx "
 +			"epc=0x%lx badaddr=0x%lx status=0x%lx satp=0x%lx\n",
 +			seq, raw_smp_processor_id(), regs->cause, regs->epc,
 +			regs->badaddr, regs->status, csr_read(CSR_SATP));
@@ -36,7 +36,7 @@ index 80230de..d25b267 100644
  
  	handle_page_fault(regs);
  
-+	if (trace_keystone)
++	if (trace_keystone && seq <= 8)
 +		pr_info("KEYSTONE-PF trap exit seq=%lu cpu=%u epc=0x%lx "
 +			"badaddr=0x%lx status=0x%lx satp=0x%lx\n",
 +			seq, raw_smp_processor_id(), regs->epc, regs->badaddr,

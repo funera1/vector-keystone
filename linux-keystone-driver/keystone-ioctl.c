@@ -12,6 +12,7 @@
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include <linux/sched.h>
+#include <asm/tlbflush.h>
 
 static int keystone_create_enclave(struct file *filep, unsigned long arg)
 {
@@ -309,6 +310,11 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
                   csr_read(CSR_STATUS), csr_read(CSR_SATP));
     keystone_info("ioctl: FINALIZE copy_to_user begin size=%zu\n", ioc_size);
   }
+  
+  // Debug: TLB flush
+  keystone_info("FINALIZE: global TLB flush begin\n");
+  local_flush_tlb_all();
+  keystone_info("FINALIZE: global TLB flush end\n");
 
   not_copied = copy_to_user((void __user*) arg, data, ioc_size);
   if (cmd == KEYSTONE_IOC_FINALIZE_ENCLAVE)
