@@ -40,8 +40,15 @@ unsigned long sbi_sm_destroy_enclave(unsigned long eid)
 
 unsigned long sbi_sm_run_enclave(struct sbi_trap_regs *regs, unsigned long eid)
 {
+  sbi_printf("[SM-FLOW] sbi_sm_run_enclave enter hart=%u eid=%lu mepc=0x%lx mstatus=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus);
   regs->a0 = run_enclave(regs, (unsigned int) eid);
+  sbi_printf("[SM-FLOW] sbi_sm_run_enclave before trap exit hart=%u eid=%lu ret=0x%lx mepc=0x%lx mstatus=0x%lx\n",
+             current_hartid(), eid, regs->a0, regs->mepc,
+             regs->mstatus);
   regs->mepc += 4;
+  sbi_printf("[SM-FLOW] sbi_sm_run_enclave trap exit hart=%u eid=%lu mepc=0x%lx mstatus=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus);
   sbi_trap_exit(regs);
   return 0;
 }

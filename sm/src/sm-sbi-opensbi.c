@@ -132,6 +132,10 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
   bool preemptible = keystone_call_is_preemptible(funcid) &&
                      hartid < KEYSTONE_PREEMPT_MAX_HARTS;
 
+  sbi_printf("[SM-FLOW] ecall enter hart=%lu fid=%lu enclave_ctx=%d mepc=0x%lx mstatus=0x%lx\n",
+             hartid, funcid, cpu_is_enclave_context(), regs->mepc,
+             regs->mstatus);
+
   if (funcid <= FID_RANGE_DEPRECATED) { return SBI_ERR_SM_DEPRECATED; }
   else if (funcid <= FID_RANGE_HOST)
   {
@@ -168,6 +172,8 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
       retval = sbi_sm_destroy_enclave(regs->a0);
       break;
     case SBI_SM_RUN_ENCLAVE:
+      sbi_printf("[SM-FLOW] dispatch RUN_ENCLAVE hart=%lu eid=%lu\n",
+                 hartid, regs->a0);
       retval = sbi_sm_run_enclave((struct sbi_trap_regs*) regs, regs->a0);
       __builtin_unreachable();
       break;
