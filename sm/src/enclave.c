@@ -216,6 +216,10 @@ static inline void context_switch_to_host(struct sbi_trap_regs *regs,
 
   cpu_exit_enclave_context();
 
+  sbi_printf("[SM-PREEMPT] switch_to_host ready hart=%u eid=%u mepc=0x%lx mstatus=0x%lx mie=0x%lx mip=0x%lx satp=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus,
+             csr_read(CSR_MIE), csr_read(CSR_MIP), csr_read(CSR_SATP));
+
   return;
 }
 
