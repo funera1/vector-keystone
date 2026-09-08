@@ -7,6 +7,7 @@
 #include "pmp.h"
 #include "page.h"
 #include "cpu.h"
+#include "sm-sbi-opensbi.h"
 #include "platform-hook.h"
 #include <sbi/sbi_string.h>
 #include <sbi/riscv_asm.h>
@@ -22,6 +23,22 @@ struct enclave enclaves[ENCL_MAX];
 
 static spinlock_t encl_lock = SPIN_LOCK_INITIALIZER;
 
+static inline void keystone_debug_encl_lock(spinlock_t *lock,
+                                            unsigned long site)
+{
+  spin_lock(lock);
+  keystone_preempt_debug_lock_acquired(KEYSTONE_DEBUG_LOCK_ENCLAVE, site);
+}
+
+static inline void keystone_debug_encl_unlock(spinlock_t *lock)
+{
+  keystone_preempt_debug_lock_released(KEYSTONE_DEBUG_LOCK_ENCLAVE);
+  spin_unlock(lock);
+}
+
+#define spin_lock(lock) keystone_debug_encl_lock((lock), __LINE__)
+#define spin_unlock(lock) keystone_debug_encl_unlock(lock)
+
 static inline unsigned long create_timing_cycles(void)
 {
   unsigned long cycles;
@@ -29,20 +46,45 @@ static inline unsigned long create_timing_cycles(void)
   return cycles;
 }
 
-static unsigned long create_timing_us(uint64_t ticks)
-{
-  const struct sbi_timer_device *timer = sbi_timer_get_device();
+static unsigned long measurement_debug_sequence;
 
-  if (!timer || !timer->timer_freq)
-    return 0;
-  return (unsigned long)((ticks * 1000000ULL) / timer->timer_freq);
+static bool measurement_debug_should_log(unsigned long sequence,
+                                         unsigned long ret)
+{
+  return sequence <= 8 || !(sequence & (sequence - 1)) ||
+         ret == SBI_ERR_SM_ENCLAVE_SUCCESS;
+}
+
+static void measurement_debug_log(const char *event, enclave_id eid,
+                                  unsigned long sequence,
+                                  struct enclave_measurement *measurement,
+                                  unsigned long ret)
+{
+  unsigned long mstatus = csr_read_clear(CSR_MSTATUS, MSTATUS_MIE);
+
+  sbi_printf("[SM-DEBUG] measurement %s hart=%lu eid=%lu seq=%lu "
+             "next=0x%lx end=0x%lx ret=0x%lx\n",
+             event, (unsigned long)current_hartid(), (unsigned long)eid,
+             sequence, measurement->next_page, measurement->end_page, ret);
+
+  if (mstatus & MSTATUS_MIE)
+    csr_set(CSR_MSTATUS, MSTATUS_MIE);
 }
 
 static unsigned long run_measurement_slice(enclave_id eid)
 {
   struct enclave *enclave = &enclaves[eid];
   struct enclave_measurement *measurement = &enclave->measurement;
+  unsigned long sequence = ++measurement_debug_sequence;
+
+  if (measurement_debug_should_log(sequence, SBI_ERR_SM_ENCLAVE_INTERRUPTED))
+    measurement_debug_log("enter", eid, sequence, measurement,
+                          SBI_ERR_SM_ENCLAVE_INTERRUPTED);
+
   unsigned long ret = validate_and_hash_enclave(enclave);
+
+  if (measurement_debug_should_log(sequence, ret))
+    measurement_debug_log("exit", eid, sequence, measurement, ret);
 
   spin_lock(&encl_lock);
   if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS)
@@ -50,29 +92,6 @@ static unsigned long run_measurement_slice(enclave_id eid)
   else
     enclave->state = HASHING;
   spin_unlock(&encl_lock);
-
-  if (ret == SBI_ERR_SM_ENCLAVE_SUCCESS) {
-    uint64_t end_ticks = sbi_timer_value();
-    unsigned long end_cycles = create_timing_cycles();
-
-    sbi_printf(
-        "SM_CREATE_TIMING,pmp_setup_us,%lu,pmp_setup_ticks,%llu,pmp_setup_cycles,%lu,"
-        "clean_us,%lu,clean_ticks,%llu,clean_cycles,%lu,"
-        "platform_us,%lu,platform_ticks,%llu,platform_cycles,%lu,"
-        "validate_hash_us,%lu,validate_hash_ticks,%llu,validate_hash_cycles,%lu\n",
-        create_timing_us(measurement->pmp_ticks),
-        (unsigned long long)measurement->pmp_ticks,
-        measurement->pmp_cycles,
-        create_timing_us(measurement->clean_ticks),
-        (unsigned long long)measurement->clean_ticks,
-        measurement->clean_cycles,
-        create_timing_us(measurement->platform_ticks),
-        (unsigned long long)measurement->platform_ticks,
-        measurement->platform_cycles,
-        create_timing_us(end_ticks - measurement->start_ticks),
-        (unsigned long long)(end_ticks - measurement->start_ticks),
-        end_cycles - measurement->start_cycles);
-  }
 
   return ret;
 }
@@ -98,10 +117,16 @@ extern byte dev_public_key[PUBLIC_KEY_SIZE];
 static inline void context_switch_to_enclave(struct sbi_trap_regs* regs,
                                                 enclave_id eid,
                                                 int load_parameters){
+  sbi_printf("[SM-FLOW] context_switch_to_enclave enter hart=%u eid=%u load=%d host_mepc=0x%lx host_mstatus=0x%lx\n",
+             current_hartid(), eid, load_parameters, regs->mepc,
+             regs->mstatus);
   /* save host context */
   swap_prev_state(&enclaves[eid].threads[0], regs, 1);
   swap_prev_mepc(&enclaves[eid].threads[0], regs, regs->mepc);
   swap_prev_mstatus(&enclaves[eid].threads[0], regs, regs->mstatus);
+
+  sbi_printf("[SM-FLOW] context_switch_to_enclave context loaded hart=%u eid=%u mepc=0x%lx mstatus=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus);
 
   uintptr_t interrupts = 0;
   csr_write(mideleg, interrupts);
@@ -143,6 +168,9 @@ static inline void context_switch_to_enclave(struct sbi_trap_regs* regs,
   // Setup any platform specific defenses
   platform_switch_to_enclave(&(enclaves[eid]));
   cpu_enter_enclave_context(eid);
+  sbi_printf("[SM-FLOW] context_switch_to_enclave ready hart=%u eid=%u mepc=0x%lx mstatus=0x%lx satp=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus,
+             csr_read(CSR_SATP));
 }
 
 static inline void context_switch_to_host(struct sbi_trap_regs *regs,
@@ -187,6 +215,10 @@ static inline void context_switch_to_host(struct sbi_trap_regs *regs,
   platform_switch_from_enclave(&(enclaves[eid]));
 
   cpu_exit_enclave_context();
+
+  sbi_printf("[SM-PREEMPT] switch_to_host ready hart=%u eid=%u mepc=0x%lx mstatus=0x%lx mie=0x%lx mip=0x%lx satp=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus,
+             csr_read(CSR_MIE), csr_read(CSR_MIP), csr_read(CSR_SATP));
 
   return;
 }
@@ -299,10 +331,18 @@ unsigned long copy_enclave_create_args(uintptr_t src, struct keystone_sbi_create
 
   int region_overlap = copy_to_sm(dest, src, sizeof(struct keystone_sbi_create_t));
 
-  if (region_overlap)
+  if (region_overlap) {
+    sbi_printf(
+        "[SM-DEBUG] create args copy failed hart=%lu src=0x%lx "
+        "mstatus=0x%lx satp=0x%lx pmpcfg0=0x%lx "
+        "pmpaddr0=0x%lx pmpaddr1=0x%lx pmpaddr2=0x%lx\n",
+        (unsigned long)current_hartid(), src, csr_read(CSR_MSTATUS), csr_read(CSR_SATP),
+        csr_read(CSR_PMPCFG0), csr_read(CSR_PMPADDR0), csr_read(CSR_PMPADDR1),
+        csr_read(CSR_PMPADDR2));
     return SBI_ERR_SM_ENCLAVE_REGION_OVERLAPS;
-  else
+  } else {
     return SBI_ERR_SM_ENCLAVE_SUCCESS;
+  }
 }
 
 /* copies data from enclave, source must be inside EPM */
@@ -610,6 +650,9 @@ unsigned long run_enclave(struct sbi_trap_regs *regs, enclave_id eid)
 {
   int runable;
 
+  sbi_printf("[SM-FLOW] run_enclave enter hart=%u eid=%u mepc=0x%lx mstatus=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus);
+
   spin_lock(&encl_lock);
   runable = (ENCLAVE_EXISTS(eid)
             && enclaves[eid].state == FRESH);
@@ -624,7 +667,12 @@ unsigned long run_enclave(struct sbi_trap_regs *regs, enclave_id eid)
   }
 
   // Enclave is OK to run, context switch to it
+  sbi_printf("[SM-FLOW] run_enclave switching hart=%u eid=%u\n",
+             current_hartid(), eid);
   context_switch_to_enclave(regs, eid, 1);
+
+  sbi_printf("[SM-FLOW] run_enclave switched hart=%u eid=%u mepc=0x%lx mstatus=0x%lx\n",
+             current_hartid(), eid, regs->mepc, regs->mstatus);
 
   return SBI_ERR_SM_ENCLAVE_SUCCESS;
 }

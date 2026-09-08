@@ -14,7 +14,9 @@ HOST_RUST_SDK_DEMO_DEPENDENCIES += host-makeself
 HOST_RUST_SDK_DEMO_DEPENDENCIES += keystone-examples
 
 define HOST_RUST_SDK_DEMO_BUILD_CMDS
-	PATH=$(HOST_DIR)/bin:$$PATH $(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 $(MAKE) -C $(@D) all
+	PATH=/usr/bin:$(HOST_DIR)/bin:$$PATH \
+		RUSTUP_TOOLCHAIN=nightly-2025-07-14 \
+		$(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 $(MAKE) -C $(@D) all
 endef
 
 # Creates a self-extracting archive using makeself. This archive

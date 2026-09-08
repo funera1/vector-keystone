@@ -2,6 +2,9 @@
 #ifndef _PLATFORM_H_
 #define _PLATFORM_H_
 
+/* Keep RANDOM in SHA3 long enough to exercise M-mode timer preemption in QEMU. */
+#define KEYSTONE_DEBUG_RANDOM_PREEMPT_ITERATIONS 100000UL
+
 // No special data needed for default platform
 struct platform_enclave_data{
 
@@ -26,4 +29,3 @@ struct platform_enclave_data{
 void sm_copy_key(void);
 
 #endif // _PLATFORM_H_
-
