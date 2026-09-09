@@ -88,6 +88,8 @@ static int __init keystone_dev_init(void)
 
   keystone_dev.this_device->coherent_dma_mask = DMA_BIT_MASK(32);
 
+  keystone_preemption_init();
+
   pr_info("keystone_enclave: " DRV_DESCRIPTION " v" DRV_VERSION "\n");
   return ret;
 }
@@ -95,6 +97,7 @@ static int __init keystone_dev_init(void)
 static void __exit keystone_dev_exit(void)
 {
   pr_info("keystone_enclave: keystone_dev_exit()\n");
+  keystone_preemption_exit();
   misc_deregister(&keystone_dev);
   return;
 }

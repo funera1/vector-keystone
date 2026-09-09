@@ -17,4 +17,9 @@ struct sbiret sbi_sm_destroy_enclave(unsigned long eid);
 struct sbiret sbi_sm_run_enclave(unsigned long eid);
 struct sbiret sbi_sm_resume_enclave(unsigned long eid);
 
+int keystone_register_preemption_target(unsigned long pc, unsigned long sp,
+                                        unsigned long opaque);
+void keystone_resume_preempted(unsigned long continuation_id) __noreturn;
+int keystone_unregister_preemption_target(void);
+
 #endif
