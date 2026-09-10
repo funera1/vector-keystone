@@ -19,13 +19,13 @@ static void miralis_activation_complete(struct sbi_trap_regs *regs,
                                          unsigned long error,
                                          unsigned long value)
 {
-  /* The host frame is restored by exit_enclave/stop_enclave.  Re-execute the
-   * saved host ECALL as a generic Miralis completion notification. */
+  /* The host frame is restored by exit_enclave/stop_enclave.  Its mepc still
+   * points at the original ECALL: sbi_trap_exit does not advance it.  Execute
+   * that instruction with the generic completion ABI instead. */
   regs->a0 = error;
   regs->a1 = value;
   regs->a6 = MIRALIS_ACTIVATION_COMPLETE;
   regs->a7 = SBI_EXT_MIRALIS;
-  regs->mepc -= 4;
 }
 
 unsigned long sbi_sm_create_enclave(unsigned long* eid, uintptr_t create_args)
