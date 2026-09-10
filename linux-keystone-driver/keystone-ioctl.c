@@ -126,6 +126,22 @@ error_destroy_enclave:
 
 }
 
+static struct sbiret keystone_activation_call(unsigned long fid,
+                                              unsigned long eid)
+{
+  struct sbiret ret;
+
+  ret = sbi_miralis_activation_call(
+      SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, fid, eid, 0, 0, 0);
+  while (ret.error == (long)-9) {
+    /* Linux is free to schedule another task before retrying this activation. */
+    cond_resched();
+    ret = sbi_miralis_activation_resume(ret.value);
+  }
+
+  return ret;
+}
+
 static int keystone_run_enclave(unsigned long data)
 {
   struct sbiret ret;
@@ -147,13 +163,7 @@ static int keystone_run_enclave(unsigned long data)
   }
 
   pr_info("keystone_enclave: RUN: before RUN_ENCLAVE eid=%lu\n", enclave->eid);
-  ret = sbi_miralis_activation_call(
-      SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, SBI_SM_RUN_ENCLAVE,
-      enclave->eid, 0, 0, 0);
-  while (ret.error == (long)-9) {
-    cond_resched();
-    ret = sbi_miralis_activation_resume(ret.value);
-  }
+  ret = keystone_activation_call(SBI_SM_RUN_ENCLAVE, enclave->eid);
   pr_info("keystone_enclave: RUN: after RUN_ENCLAVE eid=%lu error=0x%lx value=0x%lx\n",
           enclave->eid, ret.error, ret.value);
 
@@ -254,7 +264,7 @@ static int keystone_resume_enclave(unsigned long data)
     return -EINVAL;
   }
 
-  ret = sbi_sm_resume_enclave(enclave->eid);
+  ret = keystone_activation_call(SBI_SM_RESUME_ENCLAVE, enclave->eid);
 
   arg->error = ret.error;
   arg->value = ret.value;

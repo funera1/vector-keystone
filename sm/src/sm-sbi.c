@@ -34,11 +34,19 @@ unsigned long sbi_sm_create_enclave(unsigned long* eid, uintptr_t create_args)
   unsigned long ret;
 
   ret = copy_enclave_create_args(create_args, &create_args_local);
+  sbi_printf("[SM-FLOW] create args copied hart=%u ret=0x%lx\n",
+             current_hartid(), ret);
 
   if (ret)
     return ret;
 
+  sbi_printf("[SM-FLOW] create enclave begin hart=%u epm=0x%lx+0x%lx utm=0x%lx+0x%lx\n",
+             current_hartid(), create_args_local.epm_region.paddr,
+             create_args_local.epm_region.size, create_args_local.utm_region.paddr,
+             create_args_local.utm_region.size);
   ret = create_enclave(eid, create_args_local);
+  sbi_printf("[SM-FLOW] create enclave complete hart=%u ret=0x%lx\n",
+             current_hartid(), ret);
   return ret;
 }
 
