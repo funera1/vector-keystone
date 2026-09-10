@@ -15,11 +15,11 @@ struct sbiret sbi_sm_create_enclave(struct keystone_sbi_create_t* args);
 struct sbiret sbi_sm_resume_create_enclave(unsigned long eid);
 struct sbiret sbi_sm_destroy_enclave(unsigned long eid);
 struct sbiret sbi_sm_run_enclave(unsigned long eid);
+struct sbiret sbi_miralis_activation_call(unsigned long, unsigned long,
+                                           unsigned long, unsigned long,
+                                           unsigned long, unsigned long);
+struct sbiret sbi_miralis_activation_resume(unsigned long);
 struct sbiret sbi_sm_resume_enclave(unsigned long eid);
 
-int keystone_register_preemption_target(unsigned long pc, unsigned long sp,
-                                        unsigned long opaque);
-void keystone_resume_preempted(unsigned long continuation_id) __noreturn;
-int keystone_unregister_preemption_target(void);
 
 #endif

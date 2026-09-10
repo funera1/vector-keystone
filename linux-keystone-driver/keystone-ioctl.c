@@ -147,7 +147,13 @@ static int keystone_run_enclave(unsigned long data)
   }
 
   pr_info("keystone_enclave: RUN: before RUN_ENCLAVE eid=%lu\n", enclave->eid);
-  ret = sbi_sm_run_enclave(enclave->eid);
+  ret = sbi_miralis_activation_call(
+      SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, SBI_SM_RUN_ENCLAVE,
+      enclave->eid, 0, 0, 0);
+  while (ret.error == (long)-9) {
+    cond_resched();
+    ret = sbi_miralis_activation_resume(ret.value);
+  }
   pr_info("keystone_enclave: RUN: after RUN_ENCLAVE eid=%lu error=0x%lx value=0x%lx\n",
           enclave->eid, ret.error, ret.value);
 

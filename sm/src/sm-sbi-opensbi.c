@@ -63,19 +63,6 @@ void keystone_preempt_debug_lock_released(unsigned long lock)
     preempt_debug[hartid].lock_site = 0;
 }
 
-static bool keystone_call_is_preemptible(unsigned long funcid)
-{
-  switch (funcid) {
-    case SBI_SM_RUN_ENCLAVE:
-    case SBI_SM_RESUME_ENCLAVE:
-    case SBI_SM_STOP_ENCLAVE:
-    case SBI_SM_EXIT_ENCLAVE:
-      return false;
-    default:
-      return true;
-  }
-}
-
 static unsigned long keystone_test_long_operation(void)
 {
   volatile unsigned long progress;
@@ -135,8 +122,9 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
 {
   uintptr_t retval;
   unsigned long hartid = current_hartid();
-  bool preemptible = keystone_call_is_preemptible(funcid) &&
-                     hartid < KEYSTONE_PREEMPT_MAX_HARTS;
+  /* Miralis owns timer preemption for activation executions.  The former
+   * Keystone-specific M-mode handoff must remain disabled. */
+  bool preemptible = false;
 
   sbi_printf("[SM-FLOW] ecall enter hart=%lu fid=%lu enclave_ctx=%d mepc=0x%lx mstatus=0x%lx\n",
              hartid, funcid, cpu_is_enclave_context(), regs->mepc,

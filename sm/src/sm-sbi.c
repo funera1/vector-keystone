@@ -12,6 +12,22 @@
 #include <sbi/riscv_asm.h>
 #include <sbi/sbi_console.h>
 
+#define SBI_EXT_MIRALIS 0x08475bcdUL
+#define MIRALIS_ACTIVATION_COMPLETE 7UL
+
+static void miralis_activation_complete(struct sbi_trap_regs *regs,
+                                         unsigned long error,
+                                         unsigned long value)
+{
+  /* The host frame is restored by exit_enclave/stop_enclave.  Re-execute the
+   * saved host ECALL as a generic Miralis completion notification. */
+  regs->a0 = error;
+  regs->a1 = value;
+  regs->a6 = MIRALIS_ACTIVATION_COMPLETE;
+  regs->a7 = SBI_EXT_MIRALIS;
+  regs->mepc -= 4;
+}
+
 unsigned long sbi_sm_create_enclave(unsigned long* eid, uintptr_t create_args)
 {
   struct keystone_sbi_create_t create_args_local;
@@ -69,7 +85,7 @@ unsigned long sbi_sm_exit_enclave(struct sbi_trap_regs *regs, unsigned long retv
 {
   regs->a0 = exit_enclave(regs, cpu_get_enclave_id());
   regs->a1 = retval;
-  regs->mepc += 4;
+  miralis_activation_complete(regs, regs->a0, regs->a1);
   sbi_trap_exit(regs);
   return 0;
 }
@@ -77,7 +93,7 @@ unsigned long sbi_sm_exit_enclave(struct sbi_trap_regs *regs, unsigned long retv
 unsigned long sbi_sm_stop_enclave(struct sbi_trap_regs *regs, unsigned long request)
 {
   regs->a0 = stop_enclave(regs, request, cpu_get_enclave_id());
-  regs->mepc += 4;
+  miralis_activation_complete(regs, regs->a0, 0);
   sbi_trap_exit(regs);
   return 0;
 }
