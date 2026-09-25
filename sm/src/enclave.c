@@ -62,11 +62,6 @@ static void measurement_debug_log(const char *event, enclave_id eid,
 {
   unsigned long mstatus = csr_read_clear(CSR_MSTATUS, MSTATUS_MIE);
 
-  sbi_printf("[SM-DEBUG] measurement %s hart=%lu eid=%lu seq=%lu "
-             "next=0x%lx end=0x%lx ret=0x%lx\n",
-             event, (unsigned long)current_hartid(), (unsigned long)eid,
-             sequence, measurement->next_page, measurement->end_page, ret);
-
   if (mstatus & MSTATUS_MIE)
     csr_set(CSR_MSTATUS, MSTATUS_MIE);
 }
@@ -117,16 +112,10 @@ extern byte dev_public_key[PUBLIC_KEY_SIZE];
 static inline void context_switch_to_enclave(struct sbi_trap_regs* regs,
                                                 enclave_id eid,
                                                 int load_parameters){
-  sbi_printf("[SM-FLOW] context_switch_to_enclave enter hart=%u eid=%u load=%d host_mepc=0x%lx host_mstatus=0x%lx\n",
-             current_hartid(), eid, load_parameters, regs->mepc,
-             regs->mstatus);
   /* save host context */
   swap_prev_state(&enclaves[eid].threads[0], regs, 1);
   swap_prev_mepc(&enclaves[eid].threads[0], regs, regs->mepc);
   swap_prev_mstatus(&enclaves[eid].threads[0], regs, regs->mstatus);
-
-  sbi_printf("[SM-FLOW] context_switch_to_enclave context loaded hart=%u eid=%u mepc=0x%lx mstatus=0x%lx\n",
-             current_hartid(), eid, regs->mepc, regs->mstatus);
 
   uintptr_t interrupts = 0;
   csr_write(mideleg, interrupts);
@@ -168,9 +157,6 @@ static inline void context_switch_to_enclave(struct sbi_trap_regs* regs,
   // Setup any platform specific defenses
   platform_switch_to_enclave(&(enclaves[eid]));
   cpu_enter_enclave_context(eid);
-  sbi_printf("[SM-FLOW] context_switch_to_enclave ready hart=%u eid=%u mepc=0x%lx mstatus=0x%lx satp=0x%lx\n",
-             current_hartid(), eid, regs->mepc, regs->mstatus,
-             csr_read(CSR_SATP));
 }
 
 static inline void context_switch_to_host(struct sbi_trap_regs *regs,
@@ -215,10 +201,6 @@ static inline void context_switch_to_host(struct sbi_trap_regs *regs,
   platform_switch_from_enclave(&(enclaves[eid]));
 
   cpu_exit_enclave_context();
-
-  sbi_printf("[SM-PREEMPT] switch_to_host ready hart=%u eid=%u mepc=0x%lx mstatus=0x%lx mie=0x%lx mip=0x%lx satp=0x%lx\n",
-             current_hartid(), eid, regs->mepc, regs->mstatus,
-             csr_read(CSR_MIE), csr_read(CSR_MIP), csr_read(CSR_SATP));
 
   return;
 }
@@ -650,9 +632,6 @@ unsigned long run_enclave(struct sbi_trap_regs *regs, enclave_id eid)
 {
   int runable;
 
-  sbi_printf("[SM-FLOW] run_enclave enter hart=%u eid=%u mepc=0x%lx mstatus=0x%lx\n",
-             current_hartid(), eid, regs->mepc, regs->mstatus);
-
   spin_lock(&encl_lock);
   runable = (ENCLAVE_EXISTS(eid)
             && enclaves[eid].state == FRESH);
@@ -667,12 +646,7 @@ unsigned long run_enclave(struct sbi_trap_regs *regs, enclave_id eid)
   }
 
   // Enclave is OK to run, context switch to it
-  sbi_printf("[SM-FLOW] run_enclave switching hart=%u eid=%u\n",
-             current_hartid(), eid);
   context_switch_to_enclave(regs, eid, 1);
-
-  sbi_printf("[SM-FLOW] run_enclave switched hart=%u eid=%u mepc=0x%lx mstatus=0x%lx\n",
-             current_hartid(), eid, regs->mepc, regs->mstatus);
 
   return SBI_ERR_SM_ENCLAVE_SUCCESS;
 }
@@ -714,6 +688,10 @@ unsigned long stop_enclave(struct sbi_trap_regs *regs, uint64_t request, enclave
   if(!stoppable)
     return SBI_ERR_SM_ENCLAVE_NOT_RUNNING;
 
+  /* The saved enclave context resumes with mret.  Advance past the STOP
+   * ecall before saving it, otherwise every RESUME re-executes this ecall
+   * and immediately returns to the host again. */
+  regs->mepc += 4;
   context_switch_to_host(regs, eid, request == STOP_EDGE_CALL_HOST);
 
   switch(request) {
