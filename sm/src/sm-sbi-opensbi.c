@@ -91,9 +91,6 @@ void keystone_mmode_timer_preempt(struct sbi_trap_regs *nested_regs)
     return;
 
 #ifdef KEYSTONE_DEBUG_RANDOM_PREEMPT_ITERATIONS
-  sbi_printf("[SM-DEBUG] machine timer handler hook hart=%lu interrupted_mepc=0x%lx interrupted_mstatus=0x%lx interrupted_ra=0x%lx fid=%lu\n",
-             hartid, nested_regs->mepc, nested_regs->mstatus,
-             nested_regs->ra, preempt_debug[hartid].current_fid);
 #endif
 
   debug = &preempt_debug[hartid];
@@ -126,10 +123,6 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
    * Keystone-specific M-mode handoff must remain disabled. */
   bool preemptible = false;
 
-  sbi_printf("[SM-FLOW] ecall enter hart=%lu fid=%lu enclave_ctx=%d mepc=0x%lx mstatus=0x%lx\n",
-             hartid, funcid, cpu_is_enclave_context(), regs->mepc,
-             regs->mstatus);
-
   if (funcid <= FID_RANGE_DEPRECATED) { return SBI_ERR_SM_DEPRECATED; }
   else if (funcid <= FID_RANGE_HOST)
   {
@@ -143,25 +136,11 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
   }
 
   if (preemptible) {
-    if (funcid == SBI_SM_RANDOM)
-      sbi_printf("[SM-DEBUG] random preempt setup begin hart=%lu mie=0x%lx mip=0x%lx mstatus=0x%lx\n",
-                 hartid, csr_read(CSR_MIE), csr_read(CSR_MIP),
-                 csr_read(CSR_MSTATUS));
     preempt_debug[hartid].current_fid = funcid;
     preempt_debug[hartid].initial_a0 = regs->a0;
     preempt_return_regs[hartid] = (struct sbi_trap_regs *)regs;
     csr_set(CSR_MIE, MIP_MTIP);
-    if (funcid == SBI_SM_RANDOM)
-      sbi_printf("[SM-DEBUG] random preempt MTIE enabled hart=%lu mie=0x%lx mip=0x%lx mstatus=0x%lx\n",
-                 hartid, csr_read(CSR_MIE), csr_read(CSR_MIP),
-                 csr_read(CSR_MSTATUS));
-    if (funcid == SBI_SM_RANDOM)
-      sbi_printf("[SM-DEBUG] random preempt enabling MIE hart=%lu\n", hartid);
     csr_set(CSR_MSTATUS, MSTATUS_MIE);
-    if (funcid == SBI_SM_RANDOM)
-      sbi_printf("[SM-DEBUG] random preempt MIE enabled hart=%lu mie=0x%lx mip=0x%lx mstatus=0x%lx\n",
-                 hartid, csr_read(CSR_MIE), csr_read(CSR_MIP),
-                 csr_read(CSR_MSTATUS));
   }
 
   switch (funcid) {
@@ -169,8 +148,6 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
       retval = keystone_test_long_operation();
       break;
     case SBI_SM_CREATE_ENCLAVE:
-      sbi_printf("[SM-DEBUG] create entry hart=%lu arg0=0x%lx initial_a0=0x%lx\n",
-                 hartid, regs->a0, preempt_debug[hartid].initial_a0);
       retval = sbi_sm_create_enclave(out_val, regs->a0);
       break;
     case SBI_SM_RESUME_CREATE_ENCLAVE:
@@ -180,8 +157,6 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
       retval = sbi_sm_destroy_enclave(regs->a0);
       break;
     case SBI_SM_RUN_ENCLAVE:
-      sbi_printf("[SM-FLOW] dispatch RUN_ENCLAVE hart=%lu eid=%lu\n",
-                 hartid, regs->a0);
       retval = sbi_sm_run_enclave((struct sbi_trap_regs*) regs, regs->a0);
       __builtin_unreachable();
       break;
@@ -190,7 +165,6 @@ static int sbi_ecall_keystone_enclave_handler(unsigned long extid, unsigned long
       __builtin_unreachable();
       break;
     case SBI_SM_RANDOM:
-      sbi_printf("[SM-DEBUG] random dispatch hart=%lu\n", hartid);
       *out_val = sbi_sm_random();
       retval = 0;
       break;
