@@ -31,6 +31,11 @@ bool keystone_verbose;
 module_param_named(verbose, keystone_verbose, bool, 0644);
 MODULE_PARM_DESC(verbose, "Enable verbose Keystone enclave driver tracing");
 
+/* Diagnostic-only flush; normal Linux TLB invalidation already handles ioctl mappings. */
+bool keystone_force_tlb_flush;
+module_param_named(force_tlb_flush, keystone_force_tlb_flush, bool, 0644);
+MODULE_PARM_DESC(force_tlb_flush, "Force a local TLB flush after every Keystone ioctl");
+
 static const struct file_operations keystone_fops = {
     .owner          = THIS_MODULE,
     .mmap           = keystone_mmap,

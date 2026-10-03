@@ -29,6 +29,7 @@ typedef uintptr_t paddr_t;
 
 extern struct miscdevice keystone_dev;
 extern bool keystone_verbose;
+extern bool keystone_force_tlb_flush;
 
 long keystone_ioctl(struct file* filep, unsigned int cmd, unsigned long arg);
 int keystone_release(struct inode *inode, struct file *file);

@@ -330,10 +330,12 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
     keystone_info("ioctl: FINALIZE copy_to_user begin size=%zu\n", ioc_size);
   }
   
-  // Debug: TLB flush
-  keystone_info("FINALIZE: global TLB flush begin\n");
-  local_flush_tlb_all();
-  keystone_info("FINALIZE: global TLB flush end\n");
+  /* Diagnostic-only: forcing a global local flush perturbs RT execution. */
+  if (unlikely(keystone_force_tlb_flush)) {
+    keystone_info("FINALIZE: global TLB flush begin\n");
+    local_flush_tlb_all();
+    keystone_info("FINALIZE: global TLB flush end\n");
+  }
 
   not_copied = copy_to_user((void __user*) arg, data, ioc_size);
   if (cmd == KEYSTONE_IOC_FINALIZE_ENCLAVE)
