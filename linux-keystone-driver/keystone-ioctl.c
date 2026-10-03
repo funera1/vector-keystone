@@ -162,10 +162,10 @@ static int keystone_run_enclave(unsigned long data)
     return -EINVAL;
   }
 
-  pr_info("keystone_enclave: RUN: before RUN_ENCLAVE eid=%lu\n", enclave->eid);
+  keystone_info("RUN: before RUN_ENCLAVE eid=%lu\n", enclave->eid);
   ret = keystone_activation_call(SBI_SM_RUN_ENCLAVE, enclave->eid);
-  pr_info("keystone_enclave: RUN: after RUN_ENCLAVE eid=%lu error=0x%lx value=0x%lx\n",
-          enclave->eid, ret.error, ret.value);
+  keystone_info("RUN: after RUN_ENCLAVE eid=%lu error=0x%lx value=0x%lx\n",
+                enclave->eid, ret.error, ret.value);
 
   arg->error = ret.error;
   arg->value = ret.value;
