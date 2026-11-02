@@ -666,6 +666,8 @@ unsigned long stop_enclave(struct sbi_trap_regs *regs, uint64_t request, enclave
   if(!stoppable)
     return SBI_ERR_SM_ENCLAVE_NOT_RUNNING;
 
+  /* Resume past the STOP ecall when the enclave context is restored. */
+  regs->mepc += 4;
   context_switch_to_host(regs, eid, request == STOP_EDGE_CALL_HOST);
 
   switch(request) {
