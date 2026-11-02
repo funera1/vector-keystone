@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vector Keystone <vector-keystone@localhost>
+Date: Sat, 29 Aug 2026 00:00:00 +0900
+Subject: [PATCH] errno-list: allow aliased errno values
+
+Some host libc header combinations expose multiple errno names with the same
+numeric value.  The generated errno-to-name table then intentionally
+initializes an array slot more than once.  Do not turn that generated-code
+warning into a build failure.
+
+Signed-off-by: Vector Keystone <vector-keystone@localhost>
+---
+ src/basic/errno-list.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/basic/errno-list.c b/src/basic/errno-list.c
+index 5c2f0e2..2178eb1 100644
+--- a/src/basic/errno-list.c
++++ b/src/basic/errno-list.c
+@@ -10,7 +10,10 @@ static const struct errno_name* lookup_errno(register const char *str,
+                                              register GPERF_LEN_TYPE len);
+ 
+ #include "errno-from-name.h"
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Woverride-init"
+ #include "errno-to-name.h"
++#pragma GCC diagnostic pop
+ 
+ const char* errno_to_name(int id) {
+ 
+-- 
+2.43.0
