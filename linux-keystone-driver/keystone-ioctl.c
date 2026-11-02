@@ -9,6 +9,7 @@
 #include <asm/sbi.h>
 #include <linux/irqflags.h>
 #include <linux/preempt.h>
+#include <linux/hrtimer.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include <linux/sched.h>
@@ -39,10 +40,49 @@ static int keystone_create_enclave(struct file *filep, unsigned long arg)
 }
 
 
+#ifndef KEYSTONE_NATIVE_BUILD
+static enum hrtimer_restart keystone_activation_deadline(struct hrtimer *timer)
+{
+  return HRTIMER_NORESTART;
+}
+#endif
+
+static struct sbiret keystone_activation_call(unsigned long fid,
+                                              unsigned long arg0)
+{
+#ifdef KEYSTONE_NATIVE_BUILD
+  return sbi_ecall(SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, fid,
+                   arg0, 0, 0, 0, 0, 0);
+#else
+  unsigned long preemptions = 0;
+  struct hrtimer deadline;
+  struct sbiret ret;
+
+  /* Continuations are per-hart. Scheduling is allowed, migration is not. */
+  migrate_disable();
+  hrtimer_setup(&deadline, keystone_activation_deadline, CLOCK_MONOTONIC,
+      HRTIMER_MODE_REL_PINNED_HARD);
+  hrtimer_start(&deadline, ms_to_ktime(1), HRTIMER_MODE_REL_PINNED_HARD);
+  ret = sbi_miralis_activation_call(
+      SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, fid, arg0, 0, 0, 0);
+  hrtimer_cancel(&deadline);
+  while (ret.error == (long)-9) {
+    preemptions++;
+    cond_resched();
+    hrtimer_start(&deadline, ms_to_ktime(1), HRTIMER_MODE_REL_PINNED_HARD);
+    ret = sbi_miralis_activation_resume(ret.value);
+    hrtimer_cancel(&deadline);
+  }
+  migrate_enable();
+  if (fid == SBI_SM_CREATE_ENCLAVE)
+    pr_info("KS_ACTIVATION create preemptions=%lu error=%ld\n", preemptions, ret.error);
+  return ret;
+#endif
+}
+
 static int keystone_finalize_enclave(unsigned long arg)
 {
   struct sbiret ret;
-  unsigned long resume_count = 0;
   struct enclave *enclave;
   struct utm *utm;
   struct keystone_sbi_create_t create_args;
@@ -77,28 +117,9 @@ static int keystone_finalize_enclave(unsigned long arg)
   create_args.free_paddr = enclp->free_paddr;
   create_args.free_requested = enclp->free_requested;
 
-  ret = sbi_sm_create_enclave(&create_args);
+  ret = keystone_activation_call(SBI_SM_CREATE_ENCLAVE, (unsigned long)&create_args);
   keystone_info("finalize: CREATE_ENCLAVE returned error=0x%lx value=0x%lx\n",
                 (unsigned long)ret.error, (unsigned long)ret.value);
-
-  if (ret.error == SBI_ERR_SM_ENCLAVE_INTERRUPTED) {
-    enclave->eid = ret.value;
-    do {
-      cond_resched();
-      ret = sbi_sm_resume_create_enclave(enclave->eid);
-      resume_count++;
-      if (resume_count <= 8 || !(resume_count & (resume_count - 1)) ||
-          ret.error != SBI_ERR_SM_ENCLAVE_INTERRUPTED)
-        keystone_info("finalize: RESUME_CREATE_ENCLAVE count=%lu eid=%lu "
-                      "error=0x%lx value=0x%lx\n",
-                      resume_count, enclave->eid, (unsigned long)ret.error,
-                      (unsigned long)ret.value);
-    } while (ret.error == SBI_ERR_SM_ENCLAVE_INTERRUPTED);
-  }
-
-  keystone_info("finalize: resume loop exited count=%lu error=0x%lx value=0x%lx\n",
-                resume_count, (unsigned long)ret.error,
-                (unsigned long)ret.value);
 
   if (ret.error) {
     keystone_err("keystone_create_enclave: SBI call failed with error code %ld\n", ret.error);
@@ -114,7 +135,7 @@ static int keystone_finalize_enclave(unsigned long arg)
 error_destroy_enclave:
   /* This can handle partial initialization failure */
   if (enclave->eid != KEYSTONE_INVALID_EID) {
-    struct sbiret destroy_ret = sbi_sm_destroy_enclave(enclave->eid);
+    struct sbiret destroy_ret = keystone_activation_call(SBI_SM_DESTROY_ENCLAVE, enclave->eid);
     if (destroy_ret.error)
       keystone_err("failed to destroy partially initialized enclave: SBI error %ld\n",
                    destroy_ret.error);
@@ -124,22 +145,6 @@ error_destroy_enclave:
 
   return -EINVAL;
 
-}
-
-static struct sbiret keystone_activation_call(unsigned long fid,
-                                              unsigned long eid)
-{
-  struct sbiret ret;
-
-  ret = sbi_miralis_activation_call(
-      SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, fid, eid, 0, 0, 0);
-  while (ret.error == (long)-9) {
-    /* Linux is free to schedule another task before retrying this activation. */
-    cond_resched();
-    ret = sbi_miralis_activation_resume(ret.value);
-  }
-
-  return ret;
 }
 
 static int keystone_run_enclave(unsigned long data)
@@ -216,7 +221,7 @@ static int __keystone_destroy_enclave(unsigned int ueid)
   }
 
   if (enclave->eid != KEYSTONE_INVALID_EID) {
-    ret = sbi_sm_destroy_enclave(enclave->eid);
+    ret = keystone_activation_call(SBI_SM_DESTROY_ENCLAVE, enclave->eid);
     if (ret.error) {
       keystone_err("fatal: cannot destroy enclave: SBI failed with error code %ld\n", ret.error);
       return -EINVAL;
