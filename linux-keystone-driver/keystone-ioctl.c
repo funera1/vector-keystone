@@ -5,12 +5,15 @@
 #include "keystone.h"
 #include "keystone-sbi.h"
 #include "keystone_user.h"
+#include <asm/csr.h>
 #include <asm/sbi.h>
+#include <linux/irqflags.h>
 #include <linux/preempt.h>
 #include <linux/hrtimer.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include <linux/sched.h>
+#include <asm/tlbflush.h>
 
 static int keystone_create_enclave(struct file *filep, unsigned long arg)
 {
@@ -51,6 +54,7 @@ static struct sbiret keystone_activation_call(unsigned long fid,
   return sbi_ecall(SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, fid,
                    arg0, 0, 0, 0, 0, 0);
 #else
+  unsigned long preemptions = 0;
   struct hrtimer deadline;
   struct sbiret ret;
 
@@ -63,12 +67,15 @@ static struct sbiret keystone_activation_call(unsigned long fid,
       SBI_EXT_EXPERIMENTAL_KEYSTONE_ENCLAVE, fid, arg0, 0, 0, 0);
   hrtimer_cancel(&deadline);
   while (ret.error == (long)-9) {
+    preemptions++;
     cond_resched();
     hrtimer_start(&deadline, ms_to_ktime(1), HRTIMER_MODE_REL_PINNED_HARD);
     ret = sbi_miralis_activation_resume(ret.value);
     hrtimer_cancel(&deadline);
   }
   migrate_enable();
+  if (fid == SBI_SM_CREATE_ENCLAVE)
+    pr_info("KS_ACTIVATION create preemptions=%lu error=%ld\n", preemptions, ret.error);
   return ret;
 #endif
 }
@@ -111,6 +118,8 @@ static int keystone_finalize_enclave(unsigned long arg)
   create_args.free_requested = enclp->free_requested;
 
   ret = keystone_activation_call(SBI_SM_CREATE_ENCLAVE, (unsigned long)&create_args);
+  keystone_info("finalize: CREATE_ENCLAVE returned error=0x%lx value=0x%lx\n",
+                (unsigned long)ret.error, (unsigned long)ret.value);
 
   if (ret.error) {
     keystone_err("keystone_create_enclave: SBI call failed with error code %ld\n", ret.error);
@@ -120,6 +129,7 @@ static int keystone_finalize_enclave(unsigned long arg)
   if (enclave->eid == KEYSTONE_INVALID_EID)
     enclave->eid = ret.value;
 
+  keystone_info("finalize: returning success eid=%lu\n", enclave->eid);
   return 0;
 
 error_destroy_enclave:
@@ -157,7 +167,10 @@ static int keystone_run_enclave(unsigned long data)
     return -EINVAL;
   }
 
+  keystone_info("RUN: before RUN_ENCLAVE eid=%lu\n", enclave->eid);
   ret = keystone_activation_call(SBI_SM_RUN_ENCLAVE, enclave->eid);
+  keystone_info("RUN: after RUN_ENCLAVE eid=%lu error=0x%lx value=0x%lx\n",
+                enclave->eid, ret.error, ret.value);
 
   arg->error = ret.error;
   arg->value = ret.value;
@@ -267,6 +280,7 @@ static int keystone_resume_enclave(unsigned long data)
 long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
   long ret;
+  unsigned long not_copied;
   char data[512];
 
   size_t ioc_size;
@@ -286,6 +300,7 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
       break;
     case KEYSTONE_IOC_FINALIZE_ENCLAVE:
       ret = keystone_finalize_enclave((unsigned long) data);
+      keystone_info("ioctl: FINALIZE handler returned ret=%ld\n", ret);
       break;
     case KEYSTONE_IOC_DESTROY_ENCLAVE:
       ret = keystone_destroy_enclave(filep, (unsigned long) data);
@@ -307,8 +322,41 @@ long keystone_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
       return -ENOSYS;
   }
 
-  if (copy_to_user((void __user*) arg, data, ioc_size))
+  if (cmd == KEYSTONE_IOC_FINALIZE_ENCLAVE) {
+    keystone_info("ioctl: FINALIZE before copy pid=%d comm=%s "
+                  "arg=0x%lx size=%zu mm=%px active_mm=%px access_ok=%d "
+                  "preempt_count=0x%x irqs_disabled=%d pagefault_disabled=%d "
+                  "sstatus=0x%lx satp=0x%lx\n",
+                  current->pid, current->comm, arg, ioc_size, current->mm,
+                  current->active_mm,
+                  access_ok((void __user *)arg, ioc_size), preempt_count(),
+                  irqs_disabled(), pagefault_disabled(),
+                  csr_read(CSR_STATUS), csr_read(CSR_SATP));
+    keystone_info("ioctl: FINALIZE copy_to_user begin size=%zu\n", ioc_size);
+  }
+  
+  /* Diagnostic-only: forcing a global local flush perturbs RT execution. */
+  if (unlikely(keystone_force_tlb_flush)) {
+    keystone_info("FINALIZE: global TLB flush begin\n");
+    local_flush_tlb_all();
+    keystone_info("FINALIZE: global TLB flush end\n");
+  }
+
+  not_copied = copy_to_user((void __user*) arg, data, ioc_size);
+  if (cmd == KEYSTONE_IOC_FINALIZE_ENCLAVE)
+    keystone_info("ioctl: FINALIZE copy_to_user returned not_copied=%lu "
+                  "pid=%d sstatus=0x%lx satp=0x%lx\n",
+                  not_copied, current->pid, csr_read(CSR_STATUS),
+                  csr_read(CSR_SATP));
+
+  if (not_copied) {
+    if (cmd == KEYSTONE_IOC_FINALIZE_ENCLAVE)
+      keystone_err("ioctl: FINALIZE copy_to_user failed\n");
     return -EFAULT;
+  }
+
+  if (cmd == KEYSTONE_IOC_FINALIZE_ENCLAVE)
+    keystone_info("ioctl: FINALIZE returning to userspace ret=%ld\n", ret);
 
   return ret;
 }

@@ -28,6 +28,8 @@ typedef uintptr_t vaddr_t;
 typedef uintptr_t paddr_t;
 
 extern struct miscdevice keystone_dev;
+extern bool keystone_verbose;
+extern bool keystone_force_tlb_flush;
 
 long keystone_ioctl(struct file* filep, unsigned int cmd, unsigned long arg);
 int keystone_release(struct inode *inode, struct file *file);
@@ -93,7 +95,10 @@ int utm_init(struct utm* utm, size_t untrusted_size);
 paddr_t epm_va_to_pa(struct epm* epm, vaddr_t addr);
 
 #define keystone_info(fmt, ...) \
-  pr_info("keystone_enclave: " fmt, ##__VA_ARGS__)
+  do { \
+    if (unlikely(keystone_verbose)) \
+      pr_info("keystone_enclave: " fmt, ##__VA_ARGS__); \
+  } while (0)
 #define keystone_err(fmt, ...) \
   pr_err("keystone_enclave: " fmt, ##__VA_ARGS__)
 #define keystone_warn(fmt, ...) \

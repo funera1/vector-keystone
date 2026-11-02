@@ -1,0 +1,97 @@
+diff --git a/arch/riscv/mm/fault.c b/arch/riscv/mm/fault.c
+index c6b884e..5f8341d 100644
+--- a/arch/riscv/mm/fault.c
++++ b/arch/riscv/mm/fault.c
+@@ -271,6 +271,8 @@ static inline bool access_error(unsigned long cause, struct vm_area_struct *vma)
+ 	return false;
+ }
+ 
++static atomic_long_t keystone_fault_detail_seq = ATOMIC_LONG_INIT(0);
++
+ /*
+  * This routine handles page faults.  It determines the address and the
+  * problem, and then passes it off to one of the appropriate routines.
+@@ -284,12 +286,20 @@ void handle_page_fault(struct pt_regs *regs)
+ 	unsigned int flags = FAULT_FLAG_DEFAULT;
+ 	int code = SEGV_MAPERR;
+ 	vm_fault_t fault;
++	unsigned long keystone_seq = 0;
++	bool keystone_detail = false;
++	bool keystone_trace;
+ 
+ 	cause = regs->cause;
+ 	addr = regs->badaddr;
+ 
+ 	tsk = current;
+ 	mm = tsk->mm;
++	keystone_trace = !user_mode(regs) && cause == EXC_STORE_PAGE_FAULT && !strncmp(current->comm, "hello-runner", TASK_COMM_LEN);
++	if (keystone_trace) {
++		keystone_seq = atomic_long_inc_return(&keystone_fault_detail_seq);
++		keystone_detail = keystone_seq <= 8;
++	}
+ 
+ 	if (kprobe_page_fault(regs, cause))
+ 		return;
+@@ -403,7 +413,11 @@ void handle_page_fault(struct pt_regs *regs)
+ 	 * make sure we exit gracefully rather than endlessly redo
+ 	 * the fault.
+ 	 */
+-	if (!strncmp(current->comm, "hello-runner", TASK_COMM_LEN))
++	if (keystone_detail) {
++		pr_info("KEYSTONE-PF detail before seq=%lu addr=0x%lx\n", keystone_seq, addr);
++		show_pte(addr);
++	}
++	if (keystone_detail)
+ 		pr_info("KEYSTONE-PF mm before cpu=%u cause=0x%lx epc=0x%lx "
+ 			"addr=0x%lx flags=0x%x vm_start=0x%lx vm_end=0x%lx "
+ 			"vm_flags=0x%lx status=0x%lx satp=0x%lx\n",
+@@ -413,7 +427,11 @@ void handle_page_fault(struct pt_regs *regs)
+ 
+ 	fault = handle_mm_fault(vma, addr, flags, regs);
+ 
+-	if (!strncmp(current->comm, "hello-runner", TASK_COMM_LEN))
++	if (keystone_detail) {
++		pr_info("KEYSTONE-PF detail after seq=%lu addr=0x%lx\n", keystone_seq, addr);
++		show_pte(addr);
++	}
++	if (keystone_detail)
+ 		pr_info("KEYSTONE-PF mm after cpu=%u cause=0x%lx epc=0x%lx "
+ 			"addr=0x%lx fault=0x%x status=0x%lx satp=0x%lx\n",
+ 			raw_smp_processor_id(), cause, regs->epc, addr, fault,
+diff --git a/arch/riscv/mm/pgtable.c b/arch/riscv/mm/pgtable.c
+index 8b6c0a1..4e7ab01 100644
+--- a/arch/riscv/mm/pgtable.c
++++ b/arch/riscv/mm/pgtable.c
+@@ -5,10 +5,23 @@
+ #include <linux/kernel.h>
+ #include <linux/pgtable.h>
+ 
++static atomic_long_t keystone_pte_seq = ATOMIC_LONG_INIT(0);
++
+ int ptep_set_access_flags(struct vm_area_struct *vma,
+ 			  unsigned long address, pte_t *ptep,
+ 			  pte_t entry, int dirty)
+ {
++	pte_t old = ptep_get(ptep);
++	unsigned long seq = 0;
++	bool trace = !strncmp(current->comm, "hello-runner", TASK_COMM_LEN);
++
++	if (trace) {
++		seq = atomic_long_inc_return(&keystone_pte_seq);
++		if (seq <= 8)
++			pr_info("KEYSTONE-PTE set seq=%lu addr=0x%lx old=0x%lx new=0x%lx dirty=%d same=%d\n",
++				seq, address, pte_val(old), pte_val(entry), dirty,
++				pte_same(old, entry));
++	}
+ 	asm goto(ALTERNATIVE("nop", "j %l[svvptc]", 0, RISCV_ISA_EXT_SVVPTC, 1)
+ 		 : : : : svvptc);
+ 
+@@ -21,6 +34,8 @@ int ptep_set_access_flags(struct vm_area_struct *vma,
+ 	return true;
+ 
+ svvptc:
++	if (trace && seq <= 8)
++		pr_info("KEYSTONE-PTE svvptc path seq=%lu addr=0x%lx\n", seq, address);
+ 	if (!pte_same(ptep_get(ptep), entry)) {
+ 		__set_pte_at(vma->vm_mm, ptep, entry);
+ 		/* Here only not svadu is impacted */
