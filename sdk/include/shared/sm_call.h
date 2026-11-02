@@ -15,6 +15,7 @@
 #define SBI_SM_DESTROY_ENCLAVE   2002
 #define SBI_SM_RUN_ENCLAVE       2003
 #define SBI_SM_RESUME_ENCLAVE    2005
+#define SBI_SM_TEST_LONG_OPERATION 2099
 #define FID_RANGE_HOST           2999
 
 /* 3000-3999 are called by enclave */
