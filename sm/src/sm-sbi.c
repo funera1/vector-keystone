@@ -12,6 +12,28 @@
 #include <sbi/riscv_asm.h>
 #include <sbi/sbi_console.h>
 
+#define SBI_EXT_MIRALIS 0x08475bcdUL
+#define MIRALIS_ACTIVATION_COMPLETE 7UL
+
+void sbi_sm_complete_host_call(struct sbi_trap_regs *regs,
+                               unsigned long error,
+                               unsigned long value)
+{
+  /* The host frame is restored by exit_enclave/stop_enclave.  Its mepc still
+   * points at the original ECALL: sbi_trap_exit does not advance it.  Execute
+   * that instruction with the generic completion ABI instead. */
+  regs->a0 = error;
+  regs->a1 = value;
+#ifdef KEYSTONE_NATIVE_BUILD
+  regs->mepc += 4;
+#else
+  regs->a6 = MIRALIS_ACTIVATION_COMPLETE;
+  regs->a7 = SBI_EXT_MIRALIS;
+#endif
+  sbi_trap_exit(regs);
+  __builtin_unreachable();
+}
+
 unsigned long sbi_sm_create_enclave(unsigned long* eid, uintptr_t create_args)
 {
   struct keystone_sbi_create_t create_args_local;
@@ -35,7 +57,10 @@ unsigned long sbi_sm_destroy_enclave(unsigned long eid)
 
 unsigned long sbi_sm_run_enclave(struct sbi_trap_regs *regs, unsigned long eid)
 {
-  regs->a0 = run_enclave(regs, (unsigned int) eid);
+  unsigned long ret = run_enclave(regs, (unsigned int) eid);
+  if (ret)
+    sbi_sm_complete_host_call(regs, ret, 0);
+  regs->a0 = ret;
   regs->mepc += 4;
   sbi_trap_exit(regs);
   return 0;
@@ -45,9 +70,10 @@ unsigned long sbi_sm_resume_enclave(struct sbi_trap_regs *regs, unsigned long ei
 {
   unsigned long ret;
   ret = resume_enclave(regs, (unsigned int) eid);
+  if (ret)
+    sbi_sm_complete_host_call(regs, ret, 0);
   if (!regs->zero)
     regs->a0 = ret;
-  regs->mepc += 4;
 
   sbi_trap_exit(regs);
   return 0;
@@ -57,17 +83,13 @@ unsigned long sbi_sm_exit_enclave(struct sbi_trap_regs *regs, unsigned long retv
 {
   regs->a0 = exit_enclave(regs, cpu_get_enclave_id());
   regs->a1 = retval;
-  regs->mepc += 4;
-  sbi_trap_exit(regs);
-  return 0;
+  sbi_sm_complete_host_call(regs, regs->a0, regs->a1);
 }
 
 unsigned long sbi_sm_stop_enclave(struct sbi_trap_regs *regs, unsigned long request)
 {
   regs->a0 = stop_enclave(regs, request, cpu_get_enclave_id());
-  regs->mepc += 4;
-  sbi_trap_exit(regs);
-  return 0;
+  sbi_sm_complete_host_call(regs, regs->a0, 0);
 }
 
 unsigned long sbi_sm_attest_enclave(uintptr_t report, uintptr_t data, uintptr_t size)
