@@ -1,0 +1,15 @@
+#!/bin/sh
+
+case " $(cat /proc/cmdline) " in
+    *" keystone.autorun=1 "*) ;;
+    *) exit 0 ;;
+esac
+
+echo "Starting Keystone hello enclave"
+
+if ! modprobe keystone-driver; then
+    echo "Failed to load keystone-driver" >&2
+    exit 1
+fi
+
+exec taskset -c 1 /usr/share/keystone/examples/hello.ke
