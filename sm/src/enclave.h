@@ -25,8 +25,6 @@ typedef enum {
   INVALID = -1,
   DESTROYING = 0,
   ALLOCATED,
-  HASHING,
-  HASHING_BUSY,
   FRESH,
   STOPPED,
   RUNNING,
@@ -54,21 +52,6 @@ struct enclave_region
   enum enclave_region_type type;
 };
 
-struct enclave_measurement
-{
-  hash_ctx ctx;
-  uintptr_t next_page;
-  uintptr_t end_page;
-  uint64_t start_ticks;
-  unsigned long start_cycles;
-  uint64_t pmp_ticks;
-  uint64_t clean_ticks;
-  uint64_t platform_ticks;
-  unsigned long pmp_cycles;
-  unsigned long clean_cycles;
-  unsigned long platform_cycles;
-};
-
 /* enclave metadata */
 struct enclave
 {
@@ -83,7 +66,6 @@ struct enclave
   /* measurement */
   byte hash[MDSIZE];
   byte sign[SIGNATURE_SIZE];
-  struct enclave_measurement measurement;
 
   /* parameters */
   struct runtime_params_t params;
@@ -127,7 +109,6 @@ struct sealing_key
 /*** SBI functions & external functions ***/
 // callables from the host
 unsigned long create_enclave(unsigned long *eid, struct keystone_sbi_create_t create_args);
-unsigned long resume_create_enclave(enclave_id eid);
 unsigned long destroy_enclave(enclave_id eid);
 unsigned long run_enclave(struct sbi_trap_regs *regs, enclave_id eid);
 unsigned long resume_enclave(struct sbi_trap_regs *regs, enclave_id eid);
