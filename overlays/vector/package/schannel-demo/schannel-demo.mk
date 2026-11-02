@@ -11,10 +11,13 @@ HOST_SCHANNEL_DEMO_INSTALL_TARGET = YES
 
 HOST_SCHANNEL_DEMO_DEPENDENCIES += host-rust-sdk
 HOST_SCHANNEL_DEMO_DEPENDENCIES += host-static-dh-ecdh
+HOST_SCHANNEL_DEMO_DEPENDENCIES += host-makeself
 HOST_SCHANNEL_DEMO_DEPENDENCIES += keystone-examples
 
 define HOST_SCHANNEL_DEMO_BUILD_CMDS
-    $(MAKE) -C $(@D)
+	PATH=/usr/bin:$(HOST_DIR)/bin:$$PATH \
+		RUSTUP_TOOLCHAIN=nightly-2025-07-14 \
+		$(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 env -u CARGO_BUILD_TARGET $(MAKE) -C $(@D)
 endef
 
 # Creates a self-extracting archive using makeself. This archive
@@ -23,7 +26,7 @@ endef
 # resulting self-extracting application, rust-sdk-demo.ke, is
 # installed to the root user's home directory.
 define HOST_SCHANNEL_DEMO_INSTALL_CMDS
-    (cd $(@D); mkdir -p pkg; \
+    (cd $(@D); PATH="$(HOST_DIR)/bin:$$PATH"; mkdir -p pkg; \
      cp ./target/riscv64gc-unknown-none-elf/release/schannel-eapp pkg; \
      cp ./target/riscv64gc-unknown-linux-gnu/release/schannel-host pkg; \
      cp $(BUILDDIR)/buildroot.build/build/keystone-examples-*/hello/eyrie-rt pkg; \

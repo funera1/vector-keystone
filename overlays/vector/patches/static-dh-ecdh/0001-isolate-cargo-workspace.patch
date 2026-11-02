@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vector Keystone <vector-keystone@localhost>
+Date: Sat, 29 Aug 2026 00:00:00 +0900
+Subject: [PATCH] Isolate static-dh-ecdh from parent Cargo workspaces
+
+Buildroot may be located below an unrelated Cargo workspace.  An empty
+workspace table makes this package its own workspace and prevents Cargo from
+rejecting it as an unlisted member of the parent workspace.
+
+Signed-off-by: Vector Keystone <vector-keystone@localhost>
+---
+ Cargo.toml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Cargo.toml b/Cargo.toml
+index b8885a8..f8f08c0 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -30,3 +30,5 @@ getrandom = { version = "0.2", features = ["custom"] }
+ lazy_static = { version = "1.4.0"}
+ spin = "0.9.3"
+ 
++[workspace]
++
+-- 
+2.43.0
