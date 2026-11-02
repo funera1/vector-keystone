@@ -7,12 +7,17 @@
 
 #include "keystone_user.h"
 #include "sm_call.h"
+#include "sm_err.h"
 
 #include <asm/sbi.h>
 
 struct sbiret sbi_sm_create_enclave(struct keystone_sbi_create_t* args);
 struct sbiret sbi_sm_destroy_enclave(unsigned long eid);
 struct sbiret sbi_sm_run_enclave(unsigned long eid);
+struct sbiret sbi_miralis_activation_call(unsigned long, unsigned long,
+                                           unsigned long, unsigned long,
+                                           unsigned long, unsigned long);
+struct sbiret sbi_miralis_activation_resume(unsigned long);
 struct sbiret sbi_sm_resume_enclave(unsigned long eid);
 
 #endif
