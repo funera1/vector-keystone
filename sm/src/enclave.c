@@ -23,22 +23,6 @@ struct enclave enclaves[ENCL_MAX];
 
 static spinlock_t encl_lock = SPIN_LOCK_INITIALIZER;
 
-static inline void keystone_debug_encl_lock(spinlock_t *lock,
-                                            unsigned long site)
-{
-  spin_lock(lock);
-  keystone_preempt_debug_lock_acquired(KEYSTONE_DEBUG_LOCK_ENCLAVE, site);
-}
-
-static inline void keystone_debug_encl_unlock(spinlock_t *lock)
-{
-  keystone_preempt_debug_lock_released(KEYSTONE_DEBUG_LOCK_ENCLAVE);
-  spin_unlock(lock);
-}
-
-#define spin_lock(lock) keystone_debug_encl_lock((lock), __LINE__)
-#define spin_unlock(lock) keystone_debug_encl_unlock(lock)
-
 static inline unsigned long create_timing_cycles(void)
 {
   unsigned long cycles;
