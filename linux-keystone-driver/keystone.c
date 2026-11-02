@@ -22,6 +22,20 @@ MODULE_AUTHOR("Dayeol Lee <dayeol@berkeley.edu>");
 MODULE_VERSION(DRV_VERSION);
 MODULE_LICENSE("Dual BSD/GPL");
 
+/*
+ * Detailed FINALIZE/RUN tracing writes synchronously to the serial console and
+ * perturbs real-time measurements. Keep it available for diagnostics, but
+ * disable it by default.
+ */
+bool keystone_verbose;
+module_param_named(verbose, keystone_verbose, bool, 0644);
+MODULE_PARM_DESC(verbose, "Enable verbose Keystone enclave driver tracing");
+
+/* Diagnostic-only flush; normal Linux TLB invalidation already handles ioctl mappings. */
+bool keystone_force_tlb_flush;
+module_param_named(force_tlb_flush, keystone_force_tlb_flush, bool, 0644);
+MODULE_PARM_DESC(force_tlb_flush, "Force a local TLB flush after every Keystone ioctl");
+
 static const struct file_operations keystone_fops = {
     .owner          = THIS_MODULE,
     .mmap           = keystone_mmap,
