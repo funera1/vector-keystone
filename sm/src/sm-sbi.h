@@ -8,6 +8,10 @@
 #include <sbi/sbi_types.h>
 #include <sbi/sbi_trap.h>
 
+void sbi_sm_complete_host_call(struct sbi_trap_regs *regs,
+                               unsigned long error, unsigned long value)
+  __attribute__((noreturn));
+
 unsigned long
 sbi_sm_create_enclave(unsigned long *out_val, uintptr_t create_args);
 
