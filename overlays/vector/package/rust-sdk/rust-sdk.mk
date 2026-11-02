@@ -10,9 +10,12 @@ HOST_RUST_SDK_INSTALL_STAGING = YES
 HOST_RUST_SDK_INSTALL_TARGET = YES
 
 HOST_RUST_SDK_DEPENDENCIES += host-rust-bin
+HOST_RUST_SDK_DEPENDENCIES += host-rust-std-riscv64gc-none-elf
 
 define HOST_RUST_SDK_BUILD_CMDS
-	PATH=$(HOST_DIR)/bin:$$PATH $(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 $(MAKE) -C $(@D) all
+	PATH=/usr/bin:$(HOST_DIR)/bin:$$PATH \
+		RUSTUP_TOOLCHAIN=nightly-2025-07-14 \
+		$(PKG_CARGO_ENV) RUSTC_BOOTSTRAP=1 $(MAKE) -C $(@D) all
 endef
 
 $(eval $(host-generic-package))
